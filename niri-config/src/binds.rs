@@ -118,16 +118,27 @@ pub enum Action {
     CancelScreenshot,
     #[knuffel(skip)]
     ScreenshotTogglePointer,
-    Screenshot(#[knuffel(property(name = "show-pointer"), default = true)] bool),
+    Screenshot(
+        #[knuffel(property(name = "show-pointer"), default = true)] bool,
+        // Path; not settable from knuffel
+        Option<String>,
+    ),
     ScreenshotScreen(
         #[knuffel(property(name = "write-to-disk"), default = true)] bool,
         #[knuffel(property(name = "show-pointer"), default = true)] bool,
+        // Path; not settable from knuffel
+        Option<String>,
     ),
-    ScreenshotWindow(#[knuffel(property(name = "write-to-disk"), default = true)] bool),
+    ScreenshotWindow(
+        #[knuffel(property(name = "write-to-disk"), default = true)] bool,
+        // Path; not settable from knuffel
+        Option<String>,
+    ),
     #[knuffel(skip)]
     ScreenshotWindowById {
         id: u64,
         write_to_disk: bool,
+        path: Option<String>,
     },
     ToggleKeyboardShortcutsInhibit,
     CloseWindow,
@@ -303,6 +314,9 @@ pub enum Action {
     #[knuffel(skip)]
     SwitchPresetWindowHeightBackById(u64),
     MaximizeColumn,
+    MaximizeWindowToEdges,
+    #[knuffel(skip)]
+    MaximizeWindowToEdgesById(u64),
     SetColumnWidth(#[knuffel(argument, str)] SizeChange),
     ExpandColumnToAvailableWidth,
     SwitchLayout(#[knuffel(argument, str)] LayoutSwitchTarget),
@@ -361,19 +375,28 @@ impl From<niri_ipc::Action> for Action {
             niri_ipc::Action::Spawn { command } => Self::Spawn(command),
             niri_ipc::Action::SpawnSh { command } => Self::SpawnSh(command),
             niri_ipc::Action::DoScreenTransition { delay_ms } => Self::DoScreenTransition(delay_ms),
-            niri_ipc::Action::Screenshot { show_pointer } => Self::Screenshot(show_pointer),
+            niri_ipc::Action::Screenshot { show_pointer, path } => {
+                Self::Screenshot(show_pointer, path)
+            }
             niri_ipc::Action::ScreenshotScreen {
                 write_to_disk,
                 show_pointer,
-            } => Self::ScreenshotScreen(write_to_disk, show_pointer),
+                path,
+            } => Self::ScreenshotScreen(write_to_disk, show_pointer, path),
             niri_ipc::Action::ScreenshotWindow {
                 id: None,
                 write_to_disk,
-            } => Self::ScreenshotWindow(write_to_disk),
+                path,
+            } => Self::ScreenshotWindow(write_to_disk, path),
             niri_ipc::Action::ScreenshotWindow {
                 id: Some(id),
                 write_to_disk,
-            } => Self::ScreenshotWindowById { id, write_to_disk },
+                path,
+            } => Self::ScreenshotWindowById {
+                id,
+                write_to_disk,
+                path,
+            },
             niri_ipc::Action::ToggleKeyboardShortcutsInhibit {} => {
                 Self::ToggleKeyboardShortcutsInhibit
             }
@@ -568,6 +591,10 @@ impl From<niri_ipc::Action> for Action {
                 Self::SwitchPresetWindowHeightBackById(id)
             }
             niri_ipc::Action::MaximizeColumn {} => Self::MaximizeColumn,
+            niri_ipc::Action::MaximizeWindowToEdges { id: None } => Self::MaximizeWindowToEdges,
+            niri_ipc::Action::MaximizeWindowToEdges { id: Some(id) } => {
+                Self::MaximizeWindowToEdgesById(id)
+            }
             niri_ipc::Action::SetColumnWidth { change } => Self::SetColumnWidth(change),
             niri_ipc::Action::ExpandColumnToAvailableWidth {} => Self::ExpandColumnToAvailableWidth,
             niri_ipc::Action::SwitchLayout { layout } => Self::SwitchLayout(layout),
