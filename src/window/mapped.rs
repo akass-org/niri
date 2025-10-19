@@ -943,9 +943,9 @@ impl LayoutElement for Mapped {
         self.need_to_recompute_rules |= changed;
     }
 
-    fn is_floating(&self) -> bool {
-        self.is_floating
-    }
+    // fn is_floating(&self) -> bool {
+    //     self.is_floating
+    // }
 
     fn set_bounds(&self, bounds: Size<i32, Logical>) {
         self.toplevel().with_pending_state(|state| {

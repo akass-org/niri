@@ -273,7 +273,7 @@ impl LayoutElement for TestWindow {
         false
     }
     
-    fn is_floating(&self) -> bool {
-        false
-    }
+    // fn is_floating(&self) -> bool {
+    //     false
+    // }
 }
