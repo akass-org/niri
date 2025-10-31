@@ -25,6 +25,7 @@ pub struct Layout {
     pub struts: Struts,
     pub background_color: Color,
     pub blur: Blur,
+    pub background_in_working_area_only: bool,
 }
 
 impl Default for Layout {
@@ -54,6 +55,7 @@ impl Default for Layout {
             ],
             background_color: DEFAULT_BACKGROUND_COLOR,
             blur: Default::default(),
+            background_in_working_area_only: false,
         }
     }
 }
@@ -69,6 +71,7 @@ impl MergeWith<LayoutPart> for Layout {
             insert_hint,
             always_center_single_column,
             empty_workspace_above_first,
+            background_in_working_area_only,
             gaps,
             blur,
         );
@@ -131,6 +134,7 @@ pub struct LayoutPart {
     pub background_color: Option<Color>,
     #[knuffel(child)]
     pub blur: Option<BlurRule>,
+    pub background_in_working_area_only: Option<Flag>,
 }
 
 #[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq)]

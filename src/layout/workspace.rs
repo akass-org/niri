@@ -255,6 +255,11 @@ impl<W: LayoutElement> Workspace<W> {
             compute_workspace_shadow_config(options.overview.workspace_shadow, view_size);
 
         let background_color = options.layout.background_color.to_array_unpremul();
+        let background_size = if options.layout.background_in_working_area_only {
+            working_area.size
+        } else {
+            view_size
+        };
 
         Self {
             scrolling,
@@ -266,7 +271,7 @@ impl<W: LayoutElement> Workspace<W> {
             view_size,
             working_area,
             shadow: Shadow::new(shadow_config),
-            background_buffer: SolidColorBuffer::new(view_size, background_color),
+            background_buffer: SolidColorBuffer::new(background_size, background_color),
             output: Some(output),
             clock,
             base_options,
@@ -323,6 +328,11 @@ impl<W: LayoutElement> Workspace<W> {
             compute_workspace_shadow_config(options.overview.workspace_shadow, view_size);
 
         let background_color = options.layout.background_color.to_array_unpremul();
+        let background_size = if options.layout.background_in_working_area_only {
+            working_area.size
+        } else {
+            view_size
+        };
 
         Self {
             scrolling,
@@ -335,7 +345,7 @@ impl<W: LayoutElement> Workspace<W> {
             view_size,
             working_area,
             shadow: Shadow::new(shadow_config),
-            background_buffer: SolidColorBuffer::new(view_size, background_color),
+            background_buffer: SolidColorBuffer::new(background_size, background_color),
             clock,
             base_options,
             options,
@@ -391,7 +401,7 @@ impl<W: LayoutElement> Workspace<W> {
             .update_render_elements(is_active && self.floating_is_active.get(), view_rect);
 
         self.shadow.update_render_elements(
-            self.view_size,
+            self.background_geometry(),
             true,
             CornerRadius::default(),
             self.scale.fractional_scale(),
@@ -427,6 +437,15 @@ impl<W: LayoutElement> Workspace<W> {
 
         let background_color = options.layout.background_color.to_array_unpremul();
         self.background_buffer.set_color(background_color);
+
+        match (
+            self.options.layout.background_in_working_area_only,
+            options.layout.background_in_working_area_only,
+        ) {
+            (false, true) => self.background_buffer.resize(self.working_area.size),
+            (true, false) => self.background_buffer.resize(self.view_size),
+            _ => {}
+        }
 
         self.base_options = base_options;
         self.options = options;
@@ -538,6 +557,14 @@ impl<W: LayoutElement> Workspace<W> {
         self.set_view_size(scale, transform, view_size, working_area);
     }
 
+    fn background_geometry(&self) -> Rectangle<f64, Logical> {
+        if self.options.layout.background_in_working_area_only {
+            self.working_area
+        } else {
+            Rectangle::new(Point::new(0., 0.), self.view_size)
+        }
+    }
+
     fn set_view_size(
         &mut self,
         scale: smithay::output::Scale,
@@ -582,7 +609,8 @@ impl<W: LayoutElement> Workspace<W> {
             self.shadow.update_config(shadow_config);
         }
 
-        self.background_buffer.resize(size);
+        self.background_buffer
+            .resize(self.background_geometry().size);
 
         if scale_transform_changed {
             for window in self.windows() {
@@ -1677,7 +1705,7 @@ impl<W: LayoutElement> Workspace<W> {
     pub fn render_background(&self) -> SolidColorRenderElement {
         SolidColorRenderElement::from_buffer(
             &self.background_buffer,
-            Point::new(0., 0.),
+            self.background_geometry().loc,
             1.,
             Kind::Unspecified,
         )
@@ -2001,7 +2029,12 @@ impl<W: LayoutElement> Workspace<W> {
         assert!(self.view_size.w > 0.);
         assert!(self.view_size.h > 0.);
 
-        assert_eq!(self.background_buffer.size(), self.view_size);
+        if options.layout.background_in_working_area_only {
+            assert_eq!(self.background_buffer.size(), self.working_area.size);
+        } else {
+            assert_eq!(self.background_buffer.size(), self.view_size);
+        }
+
         assert_eq!(
             self.background_buffer.color().components(),
             options.layout.background_color.to_array_unpremul(),
