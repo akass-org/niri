@@ -8,15 +8,15 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::time::Duration;
 
+use smithay::backend::renderer::ExportMem;
 use anyhow::{ensure};
 use anyhow::Context as _;
 use calloop::timer::{TimeoutAction, Timer};
 use calloop::RegistrationToken;
-use smithay::backend::renderer::ExportMem;
-use pipewire::context::Context;
-use pipewire::core::{Core, PW_ID_CORE};
-use pipewire::main_loop::MainLoop;
-use pipewire::properties::Properties;
+use pipewire::context::ContextRc;
+use pipewire::core::{CoreRc, PW_ID_CORE};
+use pipewire::main_loop::MainLoopRc;
+use pipewire::properties::PropertiesBox;
 use pipewire::spa::buffer::DataType;
 use pipewire::spa::param::format::{FormatProperties, MediaSubtype, MediaType};
 use pipewire::spa::param::format_utils::parse_format;
@@ -30,7 +30,7 @@ use pipewire::spa::utils::{
     Choice, ChoiceEnum, ChoiceFlags, Direction, Fraction, Rectangle, SpaTypes,
 };
 use pipewire::spa::{self};
-use pipewire::stream::{Stream, StreamFlags, StreamListener, StreamState};
+use pipewire::stream::{Stream, StreamFlags, StreamListener, StreamRc, StreamState};
 use pipewire::sys::{pw_buffer, pw_stream_queue_buffer};
 use smithay::backend::allocator::dmabuf::{AsDmabuf, Dmabuf};
 use smithay::backend::allocator::format::FormatSet;
@@ -61,8 +61,8 @@ const SHM_BYTES_PER_PIXEL: usize = 4;
 
 
 pub struct PipeWire {
-    _context: Context,
-    pub core: Core,
+    _context: ContextRc,
+    pub core: CoreRc,
     pub token: RegistrationToken,
     event_loop: LoopHandle<'static, State>,
     to_niri: calloop::channel::Sender<PwToNiri>,
@@ -78,7 +78,7 @@ pub struct Cast {
     event_loop: LoopHandle<'static, State>,
     pub session_id: usize,
     pub stream_id: usize,
-    pub stream: Stream,
+    pub stream: StreamRc,
     _listener: StreamListener<()>,
     pub target: CastTarget,
     pub dynamic_target: bool,
@@ -151,7 +151,7 @@ fn make_video_params(
     modifiers: &Vec<Modifier>,
     size: Size<u32, Physical>,
     refresh: u32,
-    fixated: bool,
+    _fixated: bool,
 ) -> pod::Object {
     let modifier_property = if modifiers.len() == 0 {
         None
@@ -298,9 +298,9 @@ impl PipeWire {
         event_loop: LoopHandle<'static, State>,
         to_niri: calloop::channel::Sender<PwToNiri>,
     ) -> anyhow::Result<Self> {
-        let main_loop = MainLoop::new(None).context("error creating MainLoop")?;
-        let context = Context::new(&main_loop).context("error creating Context")?;
-        let core = context.connect(None).context("error creating Core")?;
+        let main_loop = MainLoopRc::new(None).context("error creating MainLoop")?;
+        let context = ContextRc::new(&main_loop, None).context("error creating Context")?;
+        let core = context.connect_rc(None).context("error creating Core")?;
 
         let to_niri_ = to_niri.clone();
         let listener = core
@@ -318,7 +318,7 @@ impl PipeWire {
             .register();
         mem::forget(listener);
 
-        struct AsFdWrapper(MainLoop);
+        struct AsFdWrapper(MainLoopRc);
         impl AsFd for AsFdWrapper {
             fn as_fd(&self) -> BorrowedFd<'_> {
                 self.0.loop_().fd()
@@ -373,8 +373,12 @@ impl PipeWire {
         };
         let redraw_ = redraw.clone();
 
-        let stream = Stream::new(&self.core, "niri-screen-cast-src", Properties::new())
-            .context("error creating Stream")?;
+        let stream = StreamRc::new(
+            self.core.clone(),
+            "niri-screen-cast-src",
+            PropertiesBox::new(),
+        )
+        .context("error creating Stream")?;
 
         let pending_size = Size::from((size.w as u32, size.h as u32));
 
