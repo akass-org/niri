@@ -17,6 +17,10 @@ use crate::render_helpers::shaders::Shaders;
 
 use super::optimized_blur_texture_element::OptimizedBlurTextureElement;
 use super::{CurrentBuffer, EffectsFramebuffers};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+pub type EffectsFramebufffersUserData = Rc<RefCell<EffectsFramebuffers>>;
 
 #[derive(Debug)]
 pub enum BlurRenderElement {
@@ -44,10 +48,11 @@ pub enum BlurRenderElement {
         size: Size<i32, Logical>,
         corner_radius: f32,
         loc: Point<i32, Physical>,
-        output: Output,
         config: Blur,
         // FIXME: Use DamageBag and expand it as needed?
         commit_counter: CommitCounter,
+        fx_buffers: EffectsFramebufffersUserData,
+        alpha_tex: Option<GlesTexture>,
     },
 }
 
@@ -62,19 +67,25 @@ impl BlurRenderElement {
     /// - Not display anything since the buffer will be empty.
     pub fn new(
         renderer: &mut impl NiriRenderer,
-        output: &Output,
+        fx_buffers: EffectsFramebufffersUserData,
         sample_area: Rectangle<i32, Logical>,
         loc: Point<i32, Physical>,
         corner_radius: f32,
         optimized: bool,
         scale: f64,
         config: Blur,
+        zoom: f64,
+        alpha_tex: Option<GlesTexture>,
     ) -> Self {
-        let fbs = &mut *EffectsFramebuffers::get(output);
-        let texture = fbs.optimized_blur.clone();
+        let texture = fx_buffers.borrow().optimized_blur.clone();
+
+        let mut final_sample_area = sample_area.to_f64().upscale(zoom);
+        let center = (fx_buffers.borrow().output_size.to_f64().to_logical(scale) / 2.).to_point();
+        final_sample_area.loc.x = center.x - (center.x - sample_area.loc.x as f64) * zoom;
+        final_sample_area.loc.y = center.y - (center.y - sample_area.loc.y as f64) * zoom;
 
         if optimized {
-            let scaled = sample_area.to_f64().upscale(scale);
+            // let scaled = sample_area.to_f64().upscale(scale);
 
             let texture = TextureRenderElement::from_static_texture(
                 Id::new(),
@@ -84,13 +95,13 @@ impl BlurRenderElement {
                 1,
                 Transform::Normal,
                 Some(1.0),
-                Some(scaled),
-                Some(scaled.size.to_i32_ceil()),
+                Some(final_sample_area),
+                Some(final_sample_area.size.to_i32_ceil()),
                 // NOTE: Since this is "optimized" blur, anything below the window will not be
                 // rendered
                 Some(vec![Rectangle::new(
-                    scaled.loc.to_i32_ceil(),
-                    scaled.size.to_i32_ceil(),
+                    final_sample_area.loc.to_i32_ceil(),
+                    final_sample_area.size.to_i32_ceil(),
                 )
                 .to_buffer(1, Transform::Normal, &sample_area.size)]),
                 Kind::Unspecified,
@@ -99,21 +110,22 @@ impl BlurRenderElement {
             Self::Optimized {
                 tex: texture.into(),
                 corner_radius,
-                noise: config.noise as f32,
+                noise: config.noise.0 as f32,
                 scale,
             }
         } else {
             Self::TrueBlur {
                 id: Id::new(),
                 scale,
-                src: sample_area.to_f64(),
+                src: final_sample_area,
                 transform: Transform::Normal,
                 size: sample_area.size,
                 corner_radius,
                 loc,
                 config,
-                output: output.clone(), // fixme i hate this
                 commit_counter: CommitCounter::default(),
+                fx_buffers,
+                alpha_tex,
             }
         }
     }
@@ -170,7 +182,7 @@ impl Element for BlurRenderElement {
             BlurRenderElement::Optimized { tex, .. } => tex.damage_since(scale, commit),
             BlurRenderElement::TrueBlur { config, .. } => {
                 let passes = config.passes;
-                let radius = config.radius as f32;
+                let radius = config.radius.0 as f32;
 
                 // Since the blur element samples from around itself, we must expand the damage it
                 // induces to include any potential changes.
@@ -214,7 +226,7 @@ impl Element for BlurRenderElement {
 }
 
 fn draw_true_blur(
-    output: &Output,
+    fx_buffers: &mut EffectsFramebuffers,
     gles_frame: &mut GlesFrame,
     config: &Blur,
     scale: f64,
@@ -225,8 +237,8 @@ fn draw_true_blur(
     opaque_regions: &[Rectangle<i32, Physical>],
     alpha: f32,
     is_tty: bool,
+    alpha_tex: Option<&GlesTexture>,
 ) -> Result<(), GlesError> {
-    let mut fx_buffers = EffectsFramebuffers::get(output);
     fx_buffers.current_buffer = CurrentBuffer::Normal;
 
     let shaders = Shaders::get_from_frame(gles_frame).blur.clone();
@@ -252,31 +264,41 @@ fn draw_true_blur(
             supports_instancing,
             dst,
             is_tty,
+            alpha_tex,
         )
     })??;
 
-    let (program, additional_uniforms) = if corner_radius == 0.0 {
-        (None, vec![])
-    } else {
-        let program = Shaders::get_from_frame(gles_frame).blur_finish.clone();
-        (
-            program,
-            vec![
-                Uniform::new(
-                    "geo",
-                    [
-                        dst.loc.x as f32,
-                        dst.loc.y as f32,
-                        dst.size.w as f32,
-                        dst.size.h as f32,
-                    ],
-                ),
-                Uniform::new("alpha", alpha),
-                Uniform::new("noise", config.noise as f32),
-                Uniform::new("corner_radius", corner_radius),
+    let program = Shaders::get_from_frame(gles_frame).blur_finish.clone();
+    let additional_uniforms = vec![
+        Uniform::new(
+            "geo",
+            [
+                dst.loc.x as f32,
+                dst.loc.y as f32,
+                dst.size.w as f32,
+                dst.size.h as f32,
             ],
-        )
-    };
+        ),
+        Uniform::new("alpha", alpha),
+        Uniform::new("noise", config.noise.0 as f32),
+        Uniform::new("corner_radius", corner_radius),
+        Uniform::new(
+            "output_size",
+            [
+                fx_buffers.output_size.w as f32,
+                fx_buffers.output_size.h as f32,
+            ],
+        ),
+        Uniform::new(
+            "ignore_alpha",
+            if alpha_tex.is_some() {
+                config.ignore_alpha.0 as f32
+            } else {
+                0.
+            },
+        ),
+        Uniform::new("alpha_tex", 1),
+    ];
 
     gles_frame.render_texture_from_to(
         &blurred_texture,
@@ -342,6 +364,7 @@ impl RenderElement<GlesRenderer> for BlurRenderElement {
                             Uniform::new("corner_radius", *corner_radius),
                             Uniform::new("noise", *noise),
                             Uniform::new("alpha", self.alpha()),
+                            Uniform::new("ignore_alpha", 0.),
                         ],
                     );
 
@@ -361,13 +384,14 @@ impl RenderElement<GlesRenderer> for BlurRenderElement {
                 }
             }
             Self::TrueBlur {
-                output,
+                fx_buffers,
                 scale,
                 corner_radius,
                 config,
+                alpha_tex,
                 ..
             } => draw_true_blur(
-                output,
+                &mut fx_buffers.borrow_mut(),
                 gles_frame,
                 config,
                 *scale,
@@ -378,6 +402,7 @@ impl RenderElement<GlesRenderer> for BlurRenderElement {
                 opaque_regions,
                 self.alpha(),
                 false,
+                alpha_tex.as_ref(),
             ),
         }
     }
@@ -409,14 +434,15 @@ impl<'render> RenderElement<TtyRenderer<'render>> for BlurRenderElement {
             }
 
             Self::TrueBlur {
-                output,
+                fx_buffers,
                 scale,
                 corner_radius,
                 config,
+                alpha_tex,
                 ..
             } => {
                 draw_true_blur(
-                    output,
+                    &mut fx_buffers.borrow_mut(),
                     frame.as_gles_frame(),
                     config,
                     *scale,
@@ -427,6 +453,7 @@ impl<'render> RenderElement<TtyRenderer<'render>> for BlurRenderElement {
                     opaque_regions,
                     self.alpha(),
                     true,
+                    alpha_tex.as_ref(),
                 )?;
             }
         }
@@ -435,9 +462,9 @@ impl<'render> RenderElement<TtyRenderer<'render>> for BlurRenderElement {
     }
 
     fn underlying_storage(
-        &self,
+        &'_ self,
         _renderer: &mut TtyRenderer<'render>,
-    ) -> Option<UnderlyingStorage> {
+    ) -> Option<UnderlyingStorage<'_>> {
         None
     }
 }

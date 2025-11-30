@@ -29,6 +29,7 @@ use super::{
 };
 use crate::animation::Clock;
 use crate::niri_render_elements;
+use crate::render_helpers::blur::EffectsFramebuffers;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::shadow::ShadowRenderElement;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
@@ -239,7 +240,7 @@ impl<W: LayoutElement> Workspace<W> {
             scale.fractional_scale(),
             clock.clone(),
             options.clone(),
-            Some(output.name())
+            Some(output.name()),
         );
 
         let floating = FloatingSpace::new(
@@ -305,7 +306,7 @@ impl<W: LayoutElement> Workspace<W> {
             scale.fractional_scale(),
             clock.clone(),
             options.clone(),
-            None
+            None,
         );
 
         let floating = FloatingSpace::new(
@@ -1651,16 +1652,22 @@ impl<W: LayoutElement> Workspace<W> {
         renderer: &mut R,
         target: RenderTarget,
         focus_ring: bool,
+        overview_zoom: f64,
     ) -> (
         impl Iterator<Item = WorkspaceRenderElement<R>>,
         impl Iterator<Item = WorkspaceRenderElement<R>>,
     ) {
+        let fx_buffers = self
+            .current_output()
+            .and_then(EffectsFramebuffers::get_user_data);
+
         let scrolling_focus_ring = focus_ring && !self.floating_is_active();
         let scrolling = self.scrolling.render_elements(
             renderer,
             target,
             scrolling_focus_ring,
-            self.current_output().unwrap(),
+            fx_buffers.clone(),
+            overview_zoom,
         );
         let scrolling = scrolling.into_iter().map(WorkspaceRenderElement::from);
 
@@ -1672,7 +1679,8 @@ impl<W: LayoutElement> Workspace<W> {
                 view_rect,
                 target,
                 floating_focus_ring,
-                self.current_output().unwrap(),
+                fx_buffers.clone(),
+                overview_zoom,
             );
             floating.into_iter().map(WorkspaceRenderElement::from)
         });

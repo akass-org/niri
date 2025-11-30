@@ -1,22 +1,30 @@
 use niri_config::utils::MergeWith as _;
-use niri_config::{Config, LayerRule};
+use niri_config::{Blur, Config, LayerRule};
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
 use smithay::backend::renderer::element::Kind;
 use smithay::desktop::{LayerSurface, PopupManager};
-use smithay::utils::{Logical, Point, Rectangle, Scale, Size};
+use smithay::utils::{Logical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::shell::wlr_layer::{ExclusiveZone, Layer};
 
 use super::ResolvedLayerRules;
 use crate::animation::Clock;
 use crate::layout::shadow::Shadow;
 use crate::niri_render_elements;
+use crate::render_helpers::blur::element::BlurRenderElement;
+use crate::render_helpers::blur::EffectsFramebuffers;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::shadow::ShadowRenderElement;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
-use crate::render_helpers::{RenderTarget, SplitElements};
+use crate::render_helpers::{render_to_texture, RenderTarget, SplitElements};
 use crate::utils::{baba_is_float_offset, round_logical_in_physical};
+use smithay::backend::allocator::Fourcc;
+use smithay::backend::renderer::gles::GlesRenderer;
+use std::cell::RefCell;
+use std::rc::Rc;
+
+type EffectsFramebufffersUserData = Rc<RefCell<EffectsFramebuffers>>;
 
 #[derive(Debug)]
 pub struct MappedLayer {
@@ -38,8 +46,12 @@ pub struct MappedLayer {
     /// Scale of the output the layer surface is on (and rounds its sizes to).
     scale: f64,
 
+    size: Size<f64, Logical>,
+
     /// Clock for driving animations.
     clock: Clock,
+
+    blur_config: Blur,
 }
 
 niri_render_elements! {
@@ -47,6 +59,7 @@ niri_render_elements! {
         Wayland = WaylandSurfaceRenderElement<R>,
         SolidColor = SolidColorRenderElement,
         Shadow = ShadowRenderElement,
+        Blur = BlurRenderElement,
     }
 }
 
@@ -65,6 +78,10 @@ impl MappedLayer {
         shadow_config.on = false;
         shadow_config.merge_with(&rules.shadow);
 
+        let mut blur_config = config.layout.blur;
+        blur_config.on = false;
+        blur_config.merge_with(&rules.blur);
+
         Self {
             surface,
             rules,
@@ -73,6 +90,8 @@ impl MappedLayer {
             scale,
             shadow: Shadow::new(shadow_config),
             clock,
+            blur_config,
+            size: Size::default(),
         }
     }
 
@@ -98,6 +117,8 @@ impl MappedLayer {
         let size = size
             .to_physical_precise_round(self.scale)
             .to_logical(self.scale);
+
+        self.size = size;
 
         self.block_out_buffer.resize(size);
 
@@ -167,8 +188,10 @@ impl MappedLayer {
         renderer: &mut R,
         location: Point<f64, Logical>,
         target: RenderTarget,
+        fx_buffers: Option<EffectsFramebufffersUserData>,
     ) -> SplitElements<LayerSurfaceRenderElement<R>> {
         let mut rv = SplitElements::default();
+        let mut gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> = None;
 
         let scale = Scale::from(self.scale);
         let alpha = self.rules.opacity.unwrap_or(1.).clamp(0., 1.);
@@ -215,11 +238,74 @@ impl MappedLayer {
                 alpha,
                 Kind::ScanoutCandidate,
             );
+
+            gles_elems = Some(render_elements_from_surface_tree(
+                renderer.as_gles_renderer(),
+                surface,
+                buf_pos.to_physical_precise_round(scale),
+                scale,
+                alpha,
+                Kind::ScanoutCandidate,
+            ));
         }
+
+        // let ignore_alpha = self.rules.blur.ignore_alpha.unwrap_or_default().0;
+        let blur_elem = (self.blur_config.on
+            && matches!(self.surface.layer(), Layer::Top | Layer::Overlay))
+        .then(|| {
+            let fx_buffers_rc = fx_buffers?;
+            let fx_buffers = fx_buffers_rc.borrow();
+
+            // debug!("render layer blur {:?}", self.rules.blur);
+            // TODO: respect sync point?
+            let alpha_tex = gles_elems
+                .and_then(|gles_elems| {
+                    let transform = fx_buffers.transform();
+
+                    render_to_texture(
+                        renderer.as_gles_renderer(),
+                        transform.transform_size(fx_buffers.output_size()),
+                        self.scale.into(),
+                        Transform::Normal,
+                        Fourcc::Abgr8888,
+                        gles_elems.into_iter(),
+                    )
+                    .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
+                    .ok()
+                })
+                .map(|r| r.0);
+
+            // let radius = self.rules.geometry_corner_radius.unwrap_or_default();
+
+            let blur_sample_area = Rectangle::new(location, self.size).to_i32_round();
+
+            Some(
+                BlurRenderElement::new(
+                    renderer,
+                    fx_buffers_rc.clone(),
+                    blur_sample_area,
+                    location.to_physical_precise_round(self.scale),
+                    self.rules
+                        .geometry_corner_radius
+                        .unwrap_or_default()
+                        .top_left,
+                    false,
+                    self.scale,
+                    self.blur_config,
+                    1.,
+                    alpha_tex,
+                )
+                .into(),
+            )
+        })
+        .flatten()
+        .into_iter();
 
         let location = location.to_physical_precise_round(scale).to_logical(scale);
         rv.normal
             .extend(self.shadow.render(renderer, location).map(Into::into));
+
+        rv.normal.extend(blur_elem);
 
         rv
     }

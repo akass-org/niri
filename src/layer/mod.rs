@@ -1,6 +1,6 @@
 use niri_config::layer_rule::{LayerRule, Match};
 use niri_config::utils::MergeWith as _;
-use niri_config::{BlockOutFrom, BlurRule, CornerRadius, ShadowRule};
+use niri_config::{BlockOutFrom, BlurRule, CornerRadius, FloatOrInt, ShadowRule};
 use smithay::desktop::LayerSurface;
 
 pub mod mapped;
@@ -56,6 +56,7 @@ impl ResolvedLayerRules {
                 passes: None,
                 radius: None,
                 noise: None,
+                ignore_alpha: None,
             },
             geometry_corner_radius: None,
             place_within_backdrop: false,

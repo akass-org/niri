@@ -1723,7 +1723,8 @@ impl<W: LayoutElement> Monitor<W> {
                 Some(elem)
             };
 
-            let (floating, scrolling) = ws.render_elements(renderer, target, focus_ring);
+            let (floating, scrolling) =
+                ws.render_elements(renderer, target, focus_ring, self.overview_zoom());
             let floating = floating.filter_map(map_ws_contents);
             let scrolling = scrolling.filter_map(map_ws_contents);
 

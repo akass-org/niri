@@ -21,14 +21,18 @@ use crate::animation::{Animation, Clock};
 use crate::input::swipe_tracker::SwipeTracker;
 use crate::layout::SizingMode;
 use crate::niri_render_elements;
+use crate::render_helpers::blur::EffectsFramebuffers;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::RenderTarget;
 use crate::utils::transaction::{Transaction, TransactionBlocker};
 use crate::utils::ResizeEdge;
 use crate::window::ResolvedWindowRules;
+use std::cell::RefCell;
 
 /// Amount of touchpad movement to scroll the view for the width of one working area.
 const VIEW_GESTURE_WORKING_AREA_MOVEMENT: f64 = 1200.;
+
+type EffectsFramebufffersUserData = Rc<RefCell<EffectsFramebuffers>>;
 
 /// A scrollable-tiling space for windows.
 #[derive(Debug)]
@@ -291,7 +295,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         scale: f64,
         clock: Clock,
         options: Rc<Options>,
-        monitor_name: Option<String>
+        monitor_name: Option<String>,
     ) -> Self {
         let working_area = compute_working_area(parent_area, scale, options.layout.struts);
 
@@ -310,7 +314,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             scale,
             clock,
             options,
-            monitor_name
+            monitor_name,
         }
     }
 
@@ -2911,7 +2915,8 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         renderer: &mut R,
         target: RenderTarget,
         focus_ring: bool,
-        output: &Output,
+        fx_buffers: Option<EffectsFramebufffersUserData>,
+        overview_zoom: f64,
     ) -> Vec<ScrollingSpaceRenderElement<R>> {
         let mut rv = vec![];
 
@@ -2966,8 +2971,15 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 }
 
                 rv.extend(
-                    tile.render(renderer, tile_pos, focus_ring, target, Some(output))
-                        .map(Into::into),
+                    tile.render(
+                        renderer,
+                        tile_pos,
+                        focus_ring,
+                        target,
+                        fx_buffers.clone(),
+                        Some(overview_zoom),
+                    )
+                    .map(Into::into),
                 );
             }
         }

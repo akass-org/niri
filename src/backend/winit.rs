@@ -129,6 +129,7 @@ impl Winit {
                     if let Err(err) = EffectsFramebuffers::update_for_output(
                         winit.output.clone(),
                         winit.backend.renderer(),
+                        None,
                     ) {
                         warn!("Failed to update EffectsFramebuffers for output resize: {err}");
                     } else {
@@ -161,7 +162,7 @@ impl Winit {
         resources::init(renderer);
         shaders::init(renderer);
         RendererData::init(renderer.as_gles_renderer());
-        EffectsFramebuffers::init_for_output(self.output.clone(), renderer);
+        EffectsFramebuffers::init_for_output(self.output.clone(), renderer, None);
 
         let config = self.config.borrow();
         if let Some(src) = config.animations.window_resize.custom_shader.as_deref() {

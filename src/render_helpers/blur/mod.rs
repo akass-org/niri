@@ -52,6 +52,7 @@ impl CurrentBuffer {
 }
 
 /// Effect framebuffers associated with each output.
+#[derive(Debug)]
 pub struct EffectsFramebuffers {
     /// Contains the main buffer blurred contents
     pub optimized_blur: GlesTexture,
@@ -70,6 +71,10 @@ pub struct EffectsFramebuffers {
     /// One exception is that if we are on the first pass, we are on [`CurrentBuffer::Initial`], we
     /// are sampling from [`Self::blit_buffer`] from initial screen contents.
     current_buffer: CurrentBuffer,
+    /// Size of the output that this object runs on.
+    output_size: Size<i32, Physical>,
+    /// Transform of the output.
+    transform: Transform,
 }
 
 type EffectsFramebufffersUserData = Rc<RefCell<EffectsFramebuffers>>;
@@ -95,13 +100,22 @@ impl EffectsFramebuffers {
         }
     }
 
+    pub fn get_user_data(output: &Output) -> Option<EffectsFramebufffersUserData> {
+        output.user_data().get().cloned()
+    }
+
     /// Initialize the [`EffectsFramebuffers`] for an [`Output`].
     ///
     /// The framebuffers handles live inside the Output's user data, use [`Self::get`] to access
     /// them.
-    pub fn init_for_output(output: Output, renderer: &mut impl NiriRenderer) {
+    pub fn init_for_output(
+        output: Output,
+        renderer: &mut impl NiriRenderer,
+        orientation: Option<Transform>,
+    ) {
         let renderer = renderer.as_gles_renderer();
-        let output_size = output.current_mode().unwrap().size;
+        let transform = orientation.unwrap_or_else(|| output.current_transform());
+        let texture_size = transform.transform_size(output.current_mode().unwrap().size);
 
         fn create_buffer(
             renderer: &mut GlesRenderer,
@@ -114,11 +128,13 @@ impl EffectsFramebuffers {
         }
 
         let this = EffectsFramebuffers {
-            optimized_blur: create_buffer(renderer, output_size).unwrap(),
+            optimized_blur: create_buffer(renderer, texture_size).unwrap(),
             optimized_blur_rerender_at: get_rerender_at(),
-            effects: create_buffer(renderer, output_size).unwrap(),
-            effects_swapped: create_buffer(renderer, output_size).unwrap(),
+            effects: create_buffer(renderer, texture_size).unwrap(),
+            effects_swapped: create_buffer(renderer, texture_size).unwrap(),
             current_buffer: CurrentBuffer::Normal,
+            transform,
+            output_size: texture_size,
         };
 
         let user_data = output.user_data();
@@ -134,10 +150,12 @@ impl EffectsFramebuffers {
     pub fn update_for_output(
         output: Output,
         renderer: &mut impl NiriRenderer,
+        orientation: Option<Transform>,
     ) -> Result<(), GlesError> {
         let renderer = renderer.as_gles_renderer();
         let mut fx_buffers = Self::get(&output);
-        let output_size = output.current_mode().unwrap().size;
+        let transform = orientation.unwrap_or_else(|| output.current_transform());
+        let texture_size = transform.transform_size(output.current_mode().unwrap().size);
 
         fn create_buffer(
             renderer: &mut GlesRenderer,
@@ -150,11 +168,13 @@ impl EffectsFramebuffers {
         }
 
         *fx_buffers = EffectsFramebuffers {
-            optimized_blur: create_buffer(renderer, output_size)?,
+            optimized_blur: create_buffer(renderer, texture_size)?,
             optimized_blur_rerender_at: get_rerender_at(),
-            effects: create_buffer(renderer, output_size)?,
-            effects_swapped: create_buffer(renderer, output_size)?,
+            effects: create_buffer(renderer, texture_size)?,
+            effects_swapped: create_buffer(renderer, texture_size)?,
             current_buffer: CurrentBuffer::Normal,
+            transform,
+            output_size: texture_size,
         };
 
         Ok(())
@@ -277,6 +297,14 @@ impl EffectsFramebuffers {
             CurrentBuffer::Swapped => (&self.effects_swapped, &mut self.effects),
         }
     }
+
+    pub fn output_size(&self) -> Size<i32, Physical> {
+        self.output_size
+    }
+
+    pub fn transform(&self) -> Transform {
+        self.transform
+    }
 }
 
 pub(super) unsafe fn get_main_buffer_blur(
@@ -292,6 +320,7 @@ pub(super) unsafe fn get_main_buffer_blur(
     // dst is the region that we want blur on
     dst: Rectangle<i32, Physical>,
     is_tty: bool,
+    alpha_tex: Option<&GlesTexture>,
 ) -> Result<GlesTexture, GlesError> {
     let tex_size = fx_buffers
         .effects
@@ -302,9 +331,9 @@ pub(super) unsafe fn get_main_buffer_blur(
     let dst_expanded = {
         let mut dst = dst;
         let size =
-            (2f32.powi(blur_config.passes as i32 + 1) * blur_config.radius as f32).ceil() as i32;
-        dst.loc -= Point::from((size, size));
-        dst.size += Size::from((size, size)).upscale(2);
+            (2f32.powi(blur_config.passes as i32 + 1) * blur_config.radius.0 as f32).ceil() as i32;
+        dst.loc -= Point::from((size, size)).upscale(8);
+        dst.size += Size::from((size, size)).upscale(16);
         dst
     };
 
@@ -312,8 +341,6 @@ pub(super) unsafe fn get_main_buffer_blur(
     gl.GetIntegerv(ffi::FRAMEBUFFER_BINDING, &mut prev_fbo as *mut _);
 
     let (sample_buffer, _) = fx_buffers.buffers();
-
-    
 
     // First get a fbo for the texture we are about to read into
     let mut sample_fbo = 0u32;
@@ -333,6 +360,13 @@ pub(super) unsafe fn get_main_buffer_blur(
             gl.DeleteFramebuffers(1, &mut sample_fbo as *mut _);
             return Err(GlesError::FramebufferBindingError);
         }
+    }
+
+    if let Some(alpha_tex) = alpha_tex {
+        gl.ActiveTexture(ffi::TEXTURE1);
+        gl.BindTexture(ffi::TEXTURE_2D, alpha_tex.tex_id());
+        gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
+        gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
     }
 
     {
@@ -560,7 +594,7 @@ fn render_blur_pass_with_frame(
             tex_mat.as_ref() as *const f32,
         );
         gl.Uniform1f(program.uniform_alpha, 1.0);
-        gl.Uniform1f(program.uniform_radius, config.radius as f32);
+        gl.Uniform1f(program.uniform_radius, config.radius.0 as f32);
         gl.Uniform2f(program.uniform_half_pixel, half_pixel[0], half_pixel[1]);
 
         gl.EnableVertexAttribArray(program.attrib_vert as u32);
@@ -735,7 +769,7 @@ unsafe fn render_blur_pass_with_gl(
             tex_mat.as_ref() as *const f32,
         );
         gl.Uniform1f(program.uniform_alpha, 1.0);
-        gl.Uniform1f(program.uniform_radius, config.radius as f32);
+        gl.Uniform1f(program.uniform_radius, config.radius.0 as f32);
         gl.Uniform2f(program.uniform_half_pixel, half_pixel[0], half_pixel[1]);
 
         gl.EnableVertexAttribArray(program.attrib_vert as u32);
@@ -795,7 +829,7 @@ fn build_texture_mat(
     transform: Transform,
 ) -> Mat3 {
     let dst_src_size = transform.transform_size(src.size);
-        // let scale = dst_src_size.to_f64() / dest.size.to_f64();
+    // let scale = dst_src_size.to_f64() / dest.size.to_f64();
 
     // let mut tex_mat = Mat3::IDENTITY;
     // first bring the damage into src scale

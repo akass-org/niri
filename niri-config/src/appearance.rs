@@ -312,14 +312,13 @@ impl From<FocusRing> for Border {
     }
 }
 
-#[derive( Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Blur {
-    // #[knuffel(child)]
-    // pub off: bool,
     pub on: bool,
     pub passes: u32,
-    pub radius: f64,
-    pub noise: f64,
+    pub radius: FloatOrInt<0, 1024>,
+    pub noise: FloatOrInt<0, 1024>,
+    pub ignore_alpha: FloatOrInt<0, 1>,
 }
 
 impl Default for Blur {
@@ -328,23 +327,23 @@ impl Default for Blur {
             // off: false,
             on: false,
             passes: 2,
-            radius: 4.,
-            noise: 0.,
+            radius: FloatOrInt(0.0),
+            noise: FloatOrInt(0.0),
+            ignore_alpha: FloatOrInt(0.),
         }
     }
 }
 
 impl MergeWith<BlurRule> for Blur {
     fn merge_with(&mut self, part: &BlurRule) {
-        self.on |= part.off;
-        if part.on {
-            self.on = true;
+        self.on |= part.on;
+        if part.off {
+            self.on = false;
         }
 
-        merge!((self, part), passes, radius, noise);
+        merge_clone!((self, part), passes, radius, noise, ignore_alpha);
     }
 }
-
 
 impl MergeWith<BorderRule> for Border {
     fn merge_with(&mut self, part: &BorderRule) {
@@ -697,6 +696,8 @@ pub struct BlurRule {
     pub radius: Option<FloatOrInt<0, 1024>>,
     #[knuffel(child, unwrap(argument))]
     pub noise: Option<FloatOrInt<0, 1024>>,
+    #[knuffel(child, unwrap(argument))]
+    pub ignore_alpha: Option<FloatOrInt<0, 1>>,
 }
 
 #[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq)]
@@ -752,23 +753,10 @@ impl MergeWith<Self> for BorderRule {
     }
 }
 
-
 impl MergeWith<Self> for BlurRule {
     fn merge_with(&mut self, part: &Self) {
         merge_on_off!((self, part));
-
-        // merge_clone_opt_ext!(
-        //     (self, part),
-        //     passes,
-        // );
-
-        // merge_clone_opt_foi!(
-        //     (self, part),
-        //     radius,
-        //     noise,
-        // );
-
-        merge_clone_opt!((self, part), passes, radius, noise);
+        merge_clone_opt!((self, part), passes, radius, noise, ignore_alpha);
     }
 }
 

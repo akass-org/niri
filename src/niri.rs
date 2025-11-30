@@ -191,6 +191,8 @@ const CLEAR_COLOR_LOCKED: [f32; 4] = [0.3, 0.1, 0.1, 1.];
 // should be ~1.995 seconds.
 const FRAME_CALLBACK_THROTTLE: Option<Duration> = Some(Duration::from_millis(995));
 
+type EffectsFramebufffersUserData = Rc<RefCell<EffectsFramebuffers>>;
+
 pub struct Niri {
     pub config: Rc<RefCell<Config>>,
 
@@ -4477,9 +4479,18 @@ impl Niri {
 
         // Get layer-shell elements.
         let layer_map = layer_map_for_output(output);
+        let fx_buffers = EffectsFramebuffers::get_user_data(output);
         let mut extend_from_layer =
             |elements: &mut SplitElements<LayerSurfaceRenderElement<R>>, layer, for_backdrop| {
-                self.render_layer(renderer, target, &layer_map, layer, elements, for_backdrop);
+                self.render_layer(
+                    renderer,
+                    target,
+                    &layer_map,
+                    layer,
+                    elements,
+                    for_backdrop,
+                    fx_buffers.clone(),
+                );
             };
 
         // The overlay layer elements go next.
@@ -4626,6 +4637,7 @@ impl Niri {
         layer: Layer,
         elements: &mut SplitElements<LayerSurfaceRenderElement<R>>,
         for_backdrop: bool,
+        fx_buffers: Option<EffectsFramebufffersUserData>,
     ) {
         // LayerMap returns layers in reverse stacking order.
         let iter = layer_map.layers_on(layer).rev().filter_map(|surface| {
@@ -4639,7 +4651,7 @@ impl Niri {
             Some((mapped, geo))
         });
         for (mapped, geo) in iter {
-            elements.extend(mapped.render(renderer, geo.loc.to_f64(), target));
+            elements.extend(mapped.render(renderer, geo.loc.to_f64(), target, fx_buffers.clone()));
         }
     }
 

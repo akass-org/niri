@@ -18,6 +18,7 @@ use super::{
 };
 use crate::animation::{Animation, Clock};
 use crate::niri_render_elements;
+use crate::render_helpers::blur::EffectsFramebuffers;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::RenderTarget;
 use crate::utils::transaction::TransactionBlocker;
@@ -26,9 +27,12 @@ use crate::utils::{
     ensure_min_max_size_maybe_zero, ResizeEdge,
 };
 use crate::window::ResolvedWindowRules;
+use std::cell::RefCell;
 
 /// By how many logical pixels the directional move commands move floating windows.
 pub const DIRECTIONAL_MOVE_PX: f64 = 50.;
+
+type EffectsFramebufffersUserData = Rc<RefCell<EffectsFramebuffers>>;
 
 /// Space for floating windows.
 #[derive(Debug)]
@@ -1065,7 +1069,8 @@ impl<W: LayoutElement> FloatingSpace<W> {
         view_rect: Rectangle<f64, Logical>,
         target: RenderTarget,
         focus_ring: bool,
-        output: &Output,
+        fx_buffers: Option<EffectsFramebufffersUserData>,
+        overview_zoom: f64,
     ) -> Vec<FloatingSpaceRenderElement<R>> {
         let mut rv = Vec::new();
 
@@ -1085,8 +1090,15 @@ impl<W: LayoutElement> FloatingSpace<W> {
             let focus_ring = focus_ring && Some(tile.window().id()) == active.as_ref();
 
             rv.extend(
-                tile.render(renderer, tile_pos, focus_ring, target, Some(output))
-                    .map(Into::into),
+                tile.render(
+                    renderer,
+                    tile_pos,
+                    focus_ring,
+                    target,
+                    fx_buffers.clone(),
+                    Some(overview_zoom),
+                )
+                .map(Into::into),
             );
         }
 
