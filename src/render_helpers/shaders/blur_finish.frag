@@ -32,24 +32,30 @@ uniform float corner_radius;
 uniform float noise;
 uniform float ignore_alpha;
 
-float rounding_alpha(vec2 coords, vec2 size, float radius) {
-    vec2 center;
+// float rounding_alpha(vec2 coords, vec2 size, float radius) {
+//     vec2 center;
 
-    if (coords.x < radius && coords.y < radius) {
-        center = vec2(radius, radius);
-    } else if (coords.x > size.x - radius && coords.y < radius) {
-        center = vec2(size.x - radius, radius);
-    } else if (coords.x > size.x - radius && coords.y > size.y - radius) {
-        center = vec2(size.x - radius, size.y - radius);
-    } else if (coords.x < radius && coords.y > size.y - radius) {
-        center = vec2(radius, size.y - radius);
-    } else {
-        return 1.0;
-    }
+//     if (coords.x < radius && coords.y < radius) {
+//         center = vec2(radius, radius);
+//     } else if (coords.x > size.x - radius && coords.y < radius) {
+//         center = vec2(size.x - radius, radius);
+//     } else if (coords.x > size.x - radius && coords.y > size.y - radius) {
+//         center = vec2(size.x - radius, size.y - radius);
+//     } else if (coords.x < radius && coords.y > size.y - radius) {
+//         center = vec2(radius, size.y - radius);
+//     } else {
+//         return 1.0;
+//     }
 
-    float dist = distance(coords, center);
-    float half_px = 0.5 ;
-    return 1.0 - smoothstep(radius - half_px, radius + half_px, dist);
+//     float dist = distance(coords, center);
+//     float half_px = 0.5 ;
+//     return 1.0 - smoothstep(radius - half_px, radius + half_px, dist);
+// }
+float fast_rounding_alpha(vec2 coords, vec2 size, float radius) {
+    // 简化版圆角计算
+    vec2 dist = abs(coords - size * 0.5) - size * 0.5 + radius;
+    float sdf = length(max(dist, 0.0)) + min(max(dist.x, dist.y), 0.0);
+    return 1.0 - smoothstep(radius - 0.5, radius + 0.5, sdf);
 }
 
 // Noise function copied from hyprland.
@@ -61,47 +67,29 @@ float hash(vec2 p) {
 }
 
 void main() {
-    vec2 texCoords;
-
-    // Sample the texture.
     vec4 color = texture2D(tex, v_coords);
 
 #if defined(NO_ALPHA)
     color = vec4(color.rgb, 1.0);
 #endif
-    float alphaMask = 1.0;
 
-    if (ignore_alpha > 0.0) {
-      vec4 alpha_color = texture2D(alpha_tex, v_coords);
-      if (alpha_color.a < ignore_alpha) {
-        alphaMask = 0.0;
-      }
-    }
+    // Alpha测试（无分支）
+    float alpha_value = texture2D(alpha_tex, v_coords).a;
+    float ignore_flag = max(sign(ignore_alpha), 0.0);
+    float alphaMask = 1.0 - ignore_flag * step(alpha_value, ignore_alpha);
 
-    // This shader exists to make blur rounding correct.
-    // 
-    // Since we are scr-ing a texture that is the size of the output, the v_coords are always
-    // relative to the output. This corresponds to gl_FragCoord.
     vec2 size = geo.zw;
-    // NOTE: this is incorrect when rendering in winit, since y is inverted,
-    // but on tty produces the correct result, which is all that matters
     vec2 loc = gl_FragCoord.xy - geo.xy;
 
-    // Add noise fx
-    // This can be used to achieve a glass look
-    float noiseHash   = hash(loc / size);
-    float noiseAmount = (mod(noiseHash, 1.0) - 0.5);
+    // 噪声（无分支）
+    float noiseHash = hash(loc / size);
+    float noise_contrib = (mod(noiseHash, 1.0) - 0.5) * noise;
+    color.rgb += noise_contrib * max(sign(alphaMask), 0.0);
 
-    if (alphaMask > 0.0) {
-      color.rgb += noiseAmount * noise;
-    }
-
-    // Apply corner rounding inside geometry.
-    if (corner_radius > 0.0) {
-      color *= rounding_alpha(loc, size, corner_radius);
-    }
-    color *= alpha;
-    color *= alphaMask;
+    // 圆角（无分支）
+    float radius_flag = max(sign(corner_radius), 0.0);
+    float round_alpha = fast_rounding_alpha(loc, size, corner_radius);
+    color.a *= mix(1.0, round_alpha, radius_flag) * alpha * alphaMask;
 
     gl_FragColor = color;
 }

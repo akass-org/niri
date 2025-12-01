@@ -14,13 +14,12 @@ uniform float radius;
 uniform vec2 half_pixel;
 
 void main() {
-    vec2 uv = niri_v_coords * 2.0;
+    vec2 offset = half_pixel * radius * 0.7071; // 45度偏移
 
     vec4 sum = texture2D(tex, uv) * 4.0;
-    sum += texture2D(tex, uv - half_pixel * radius);
-    sum += texture2D(tex, uv + half_pixel * radius);
-    sum += texture2D(tex, uv + vec2(half_pixel.x, -half_pixel.y) * radius);
-    sum += texture2D(tex, uv - vec2(half_pixel.x, -half_pixel.y) * radius);
-
+    sum += texture2D(tex, uv + vec2(offset.x, offset.y));      // ↗
+    sum += texture2D(tex, uv + vec2(-offset.x, offset.y));     // ↖
+    sum += texture2D(tex, uv + vec2(offset.x, -offset.y));     // ↘
+    sum += texture2D(tex, uv + vec2(-offset.x, -offset.y));    // ↙
     gl_FragColor = sum / 8.0;
 }
