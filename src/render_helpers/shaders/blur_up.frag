@@ -15,33 +15,13 @@ uniform float radius;
 
 void main() {
     vec2 uv = niri_v_coords / 2.0;
-    
-    // 原版：8次采样
-    // 优化：使用对称性减少采样次数
-    vec4 sum = vec4(0.0);
-    float total_weight = 0.0;
-    
-    // 4方向采样 + 中心
-    vec2 offsets[5] = vec2[](
-        vec2(0.0, 0.0),
-        vec2(half_pixel.x * radius, 0.0),
-        vec2(-half_pixel.x * radius, 0.0),
-        vec2(0.0, half_pixel.y * radius),
-        vec2(0.0, -half_pixel.y * radius)
-    );
-    
-    float weights[5] = float[](
-        4.0,  // 中心权重
-        2.0,  // 水平
-        2.0,
-        2.0,  // 垂直
-        2.0
-    );
-    
-    for (int i = 0; i < 5; i++) {
-        sum += texture2D(tex, uv + offsets[i]) * weights[i];
-        total_weight += weights[i];
-    }
-    
-    gl_FragColor = sum / total_weight;
+    vec2 offset = half_pixel * radius;
+    vec4 center = texture2D(tex, uv);
+    vec4 horizontal = texture2D(tex, uv + vec2(offset.x, 0.0));
+    horizontal += texture2D(tex, uv + vec2(-offset.x, 0.0));
+    vec4 vertical = texture2D(tex, uv + vec2(0.0, offset.y));
+    vertical += texture2D(tex, uv + vec2(0.0, -offset.y));
+
+    // 4次采样：中心 + 水平平均 + 垂直平均
+    gl_FragColor = (center * 2.0 + horizontal + vertical) / 6.0;
 }

@@ -73,23 +73,28 @@ void main() {
     color = vec4(color.rgb, 1.0);
 #endif
 
-    // Alpha测试（无分支）
+    // Alpha测试
     float alpha_value = texture2D(alpha_tex, v_coords).a;
-    float ignore_flag = max(sign(ignore_alpha), 0.0);
-    float alphaMask = 1.0 - ignore_flag * step(alpha_value, ignore_alpha);
+    
+    // 正确的无分支alpha剔除
+    // step(ignore_alpha, alpha_value): 当alpha_value>ignore_alpha时返回1
+    float alphaMask = step(ignore_alpha, alpha_value);
 
     vec2 size = geo.zw;
     vec2 loc = gl_FragCoord.xy - geo.xy;
 
-    // 噪声（无分支）
+    // 噪声（只在alpha测试通过时添加）
     float noiseHash = hash(loc / size);
-    float noise_contrib = (mod(noiseHash, 1.0) - 0.5) * noise;
-    color.rgb += noise_contrib * max(sign(alphaMask), 0.0);
+    float noise_contrib = (noiseHash - 0.5) * noise;
+    color.rgb += noise_contrib * alphaMask;  // 用alphaMask控制
 
-    // 圆角（无分支）
-    float radius_flag = max(sign(corner_radius), 0.0);
+    // 圆角
+    float radius_flag = step(0.0, corner_radius);  // 更清晰的标志
     float round_alpha = fast_rounding_alpha(loc, size, corner_radius);
-    color.a *= mix(1.0, round_alpha, radius_flag) * alpha * alphaMask;
+    // color.a *= mix(1.0, round_alpha, radius_flag) * alpha * alphaMask;
+    color *= round_alpha * radius_flag;
+    color *= alpha;
+    color *= alphaMask;
 
     gl_FragColor = color;
 }

@@ -311,7 +311,7 @@ pub(super) unsafe fn get_main_buffer_blur(
     gl: &ffi::Gles2,
     fx_buffers: &mut EffectsFramebuffers,
     shaders: &BlurShaders,
-    blur_config: Blur,
+    blur_config: &Blur,
     projection_matrix: Mat3,
     scale: i32,
     vbos: &[u32; 2],
@@ -328,12 +328,24 @@ pub(super) unsafe fn get_main_buffer_blur(
         .to_logical(1, Transform::Normal)
         .to_physical(scale);
 
+    let passes = blur_config.passes;
+
+    // 优化扩展计算
+    let expansion_needed = {
+        // 使用更精确的公式：每次pass扩展sqrt(2)倍
+        let radius = blur_config.radius.0 as f32;
+        // 高斯模糊的3-sigma规则：99.7%的权重在3*sigma内
+        let sigma = radius / 2.5; // 近似关系
+        let total_sigma = sigma * (passes as f32).sqrt(); // 多次迭代的累积
+        (total_sigma * 3.0).ceil() as i32 + 2 // 安全边界
+    };
+
     let dst_expanded = {
         let mut dst = dst;
-        let size =
-            (2f32.powi(blur_config.passes as i32 + 1) * blur_config.radius.0 as f32).ceil() as i32;
-        dst.loc -= Point::from((size, size)).upscale(8);
-        dst.size += Size::from((size, size)).upscale(16);
+        let expand = expansion_needed;
+        // 更保守的扩展
+        dst.loc -= Point::from((expand, expand));
+        dst.size += Size::from((expand * 2, expand * 2));
         dst
     };
 
@@ -427,12 +439,13 @@ pub(super) unsafe fn get_main_buffer_blur(
         }
     }
 
+    let (tex_width, tex_height) = (tex_size.w as f32, tex_size.h as f32);
     {
-        let passes = blur_config.passes;
         let half_pixel = [
             0.5 / (tex_size.w as f32 / 2.0),
             0.5 / (tex_size.h as f32 / 2.0),
         ];
+
         for i in 0..passes {
             let (sample_buffer, render_buffer) = fx_buffers.buffers();
             let damage = dst_expanded.downscale(1 << (i + 1));
@@ -447,15 +460,15 @@ pub(super) unsafe fn get_main_buffer_blur(
                 scale,
                 &shaders.down,
                 half_pixel,
-                blur_config.clone(),
+                &blur_config,
                 damage,
             )?;
             fx_buffers.current_buffer.swap();
         }
 
         let half_pixel = [
-            0.5 / (tex_size.w as f32 * 2.0),
-            0.5 / (tex_size.h as f32 * 2.0),
+            0.5 / (tex_width as f32 * 2.0),
+            0.5 / (tex_height as f32 * 2.0),
         ];
         for i in 0..passes {
             let (sample_buffer, render_buffer) = fx_buffers.buffers();
@@ -471,7 +484,7 @@ pub(super) unsafe fn get_main_buffer_blur(
                 scale,
                 &shaders.up,
                 half_pixel,
-                blur_config.clone(),
+                &blur_config,
                 damage,
             )?;
             fx_buffers.current_buffer.swap();
@@ -668,7 +681,7 @@ unsafe fn render_blur_pass_with_gl(
     // The current blur program + config
     blur_program: &shader::BlurShader,
     half_pixel: [f32; 2],
-    config: Blur,
+    config: &Blur,
     // dst is the region that should have blur
     // it gets up/downscaled with passes
     _damage: Rectangle<i32, Physical>,
