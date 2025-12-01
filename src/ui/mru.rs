@@ -426,6 +426,7 @@ impl Thumbnail {
                 // Otherwise, render the solid color as is.
                 LayoutElementRenderElement::SolidColor(elem).into()
             }
+            LayoutElementRenderElement::Blur(elem) => LayoutElementRenderElement::Blur(elem).into(),
         });
 
         let elems = elems.map(move |elem| {

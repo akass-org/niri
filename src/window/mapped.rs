@@ -1,7 +1,7 @@
 use std::cell::{Cell, Ref, RefCell};
 use std::time::Duration;
 
-use niri_config::{Color, CornerRadius, GradientInterpolation, WindowRule};
+use niri_config::{Blur, BlurRule, Color, Config, CornerRadius, GradientInterpolation, WindowRule};
 use smithay::backend::renderer::element::surface::render_elements_from_surface_tree;
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::GlesRenderer;
@@ -23,18 +23,21 @@ use wayland_backend::server::Credentials;
 
 use super::{ResolvedWindowRules, WindowRef};
 use crate::handlers::KdeDecorationsModeState;
+use crate::layer::mapped::LayerSurfaceRenderElement;
 use crate::layout::{
     ConfigureIntent, InteractiveResizeData, LayoutElement, LayoutElementRenderElement,
     LayoutElementRenderSnapshot, SizingMode,
 };
 use crate::niri_render_elements;
+use crate::render_helpers::blur::element::BlurRenderElement;
+use crate::render_helpers::blur::EffectsFramebuffers;
 use crate::render_helpers::border::BorderRenderElement;
 use crate::render_helpers::offscreen::OffscreenData;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::snapshot::RenderSnapshot;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::surface::render_snapshot_from_surface_tree;
-use crate::render_helpers::{BakedBuffer, RenderTarget, SplitElements};
+use crate::render_helpers::{render_to_texture, BakedBuffer, RenderTarget, SplitElements};
 use crate::utils::id::IdCounter;
 use crate::utils::transaction::Transaction;
 use crate::utils::{
@@ -42,6 +45,10 @@ use crate::utils::{
     with_toplevel_last_uncommitted_configure, with_toplevel_role, with_toplevel_role_and_current,
     ResizeEdge,
 };
+use niri_config::utils::MergeWith;
+use smithay::backend::allocator::Fourcc;
+use std::rc::Rc;
+type EffectsFramebufffersUserData = Rc<RefCell<EffectsFramebuffers>>;
 
 #[derive(Debug)]
 pub struct Mapped {
@@ -186,6 +193,8 @@ pub struct Mapped {
 
     /// Most recent monotonic time when the window had the focus.
     focus_timestamp: Option<Duration>,
+
+    blur_config: Blur,
 }
 
 niri_render_elements! {
@@ -247,9 +256,15 @@ enum RequestSizeOnce {
 }
 
 impl Mapped {
-    pub fn new(window: Window, rules: ResolvedWindowRules, hook: HookId) -> Self {
+    pub fn new(window: Window, rules: ResolvedWindowRules, hook: HookId, config: &Config) -> Self {
         let surface = window.wl_surface().expect("no X11 support");
         let credentials = get_credentials_for_surface(&surface);
+
+        let mut blur_config = config.layout.blur;
+        // blur_config.on = false;
+        blur_config.merge_with(&rules.blur);
+
+        // debug!("init blur config {:?} - {:?}", blur_config, &rules.blur);
 
         let mut rv = Self {
             window,
@@ -283,6 +298,7 @@ impl Mapped {
             is_pending_maximized: false,
             uncommitted_maximized: Vec::new(),
             focus_timestamp: None,
+            blur_config,
         };
 
         rv.is_maximized = rv.sizing_mode().is_maximized();
@@ -486,7 +502,14 @@ impl Mapped {
         let radius = radius.fit_to(window_size.w as f32, window_size.h as f32);
 
         let location = self.window.geometry().loc.to_f64() - bbox.loc.to_logical(scale);
-        let elements = self.render(renderer, location, scale, 1., RenderTarget::Screencast);
+        let elements = self.render(
+            renderer,
+            location,
+            scale,
+            1.,
+            RenderTarget::Screencast,
+            None, //TODO check if need fx_buffer
+        );
 
         elements.into_iter().map(move |elem| {
             if let LayoutElementRenderElement::SolidColor(elem) = &elem {
@@ -608,6 +631,7 @@ impl LayoutElement for Mapped {
         scale: Scale<f64>,
         alpha: f32,
         target: RenderTarget,
+        fx_buffers: Option<EffectsFramebufffersUserData>,
     ) -> SplitElements<LayoutElementRenderElement<R>> {
         let mut rv = SplitElements::default();
 
@@ -629,6 +653,9 @@ impl LayoutElement for Mapped {
             let surface = self.toplevel().wl_surface();
             for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
                 let offset = self.window.geometry().loc + popup_offset - popup.geometry().loc;
+                let size = popup.geometry().size.to_f64();
+
+                let mut gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> = None;
 
                 rv.popups.extend(render_elements_from_surface_tree(
                     renderer,
@@ -638,6 +665,72 @@ impl LayoutElement for Mapped {
                     alpha,
                     Kind::ScanoutCandidate,
                 ));
+
+                gles_elems = Some(render_elements_from_surface_tree(
+                    renderer.as_gles_renderer(),
+                    popup.wl_surface(),
+                    (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
+                    scale,
+                    alpha,
+                    Kind::ScanoutCandidate,
+                ));
+
+                // debug!("render blur popups {:?}", self.blur_config);
+
+                let blur_elem = self
+                    .blur_config
+                    .on
+                    .then(|| {
+                        let fx_buffers_rc = fx_buffers.as_ref()?;
+                        let fx_buffers = fx_buffers_rc.borrow();
+
+                        // debug!("render layer blur {:?}", self.rules.blur);
+                        // TODO: respect sync point?
+                        let alpha_tex = gles_elems
+                            .and_then(|gles_elems| {
+                                let transform = fx_buffers.transform();
+
+                                render_to_texture(
+                                    renderer.as_gles_renderer(),
+                                    transform.transform_size(fx_buffers.output_size()),
+                                    scale,
+                                    Transform::Normal,
+                                    Fourcc::Abgr8888,
+                                    gles_elems.into_iter(),
+                                )
+                                .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
+                                .ok()
+                            })
+                            .map(|r| r.0);
+
+                        // let radius = self.rules.geometry_corner_radius.unwrap_or_default();
+
+                        let blur_sample_area =
+                            Rectangle::new(buf_pos + offset.to_f64(), size).to_i32_round();
+
+                        Some(
+                            BlurRenderElement::new(
+                                renderer,
+                                fx_buffers_rc.clone(),
+                                blur_sample_area,
+                                (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
+                                self.rules
+                                    .geometry_corner_radius
+                                    .unwrap_or_default()
+                                    .top_left,
+                                false,
+                                scale.x,
+                                self.blur_config,
+                                1.,
+                                alpha_tex,
+                            )
+                            .into(),
+                        )
+                    })
+                    .flatten()
+                    .into_iter();
+
+                rv.popups.extend(blur_elem);
             }
 
             rv.normal = render_elements_from_surface_tree(
@@ -706,6 +799,7 @@ impl LayoutElement for Mapped {
             let surface = self.toplevel().wl_surface();
             for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
                 let offset = self.window.geometry().loc + popup_offset - popup.geometry().loc;
+                let size = popup.geometry().size.to_f64();
 
                 rv.extend(render_elements_from_surface_tree(
                     renderer,

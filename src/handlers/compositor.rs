@@ -192,11 +192,14 @@ impl CompositorHandler for State {
                         })
                         .map(|(mapped, _)| mapped.window.clone());
 
-                    // The mapped pre-commit hook deals with dma-bufs on its own.
                     self.remove_default_dmabuf_pre_commit_hook(surface);
+                    let config = self.niri.config.borrow();
+                    // The mapped pre-commit hook deals with dma-bufs on its own.
                     let hook = add_mapped_toplevel_pre_commit_hook(toplevel);
-                    let mapped = Mapped::new(window, rules, hook);
+                    let mapped = Mapped::new(window, rules, hook, &config);
                     let window = mapped.window.clone();
+
+                    drop(config);
 
                     let target = if let Some(p) = &parent {
                         // Open dialogs next to their parent window.

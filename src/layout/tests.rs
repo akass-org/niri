@@ -173,6 +173,7 @@ impl LayoutElement for TestWindow {
         _scale: Scale<f64>,
         _alpha: f32,
         _target: RenderTarget,
+        _fx_buffers: Option<EffectsFramebufffersUserData>,
     ) -> SplitElements<LayoutElementRenderElement<R>> {
         SplitElements::default()
     }

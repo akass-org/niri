@@ -1175,9 +1175,14 @@ impl<W: LayoutElement> Tile<W> {
         let mut rounded_corner_damage = None;
         let has_border_shader = BorderRenderElement::has_shader(renderer);
         if resize_shader.is_none() && resize_fallback.is_none() {
-            let window = self
-                .window
-                .render(renderer, window_render_loc, scale, win_alpha, target);
+            let window = self.window.render(
+                renderer,
+                window_render_loc,
+                scale,
+                win_alpha,
+                target,
+                fx_buffers.clone(),
+            );
 
             let geo = Rectangle::new(window_render_loc, window_size);
             let radius = radius.fit_to(window_size.w as f32, window_size.h as f32);
@@ -1237,6 +1242,9 @@ impl<W: LayoutElement> Tile<W> {
 
                     // Otherwise, render the solid color as is.
                     LayoutElementRenderElement::SolidColor(elem).into()
+                }
+                LayoutElementRenderElement::Blur(elem) => {
+                    LayoutElementRenderElement::Blur(elem).into()
                 }
             }));
 

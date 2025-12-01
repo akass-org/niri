@@ -5893,6 +5893,7 @@ impl Niri {
             scale,
             alpha,
             RenderTarget::ScreenCapture,
+            None, //TODO check if need fx_buffer
         );
         let geo = encompassing_geo(scale, elements.iter());
         let elements = elements.iter().rev().map(|elem| {

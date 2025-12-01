@@ -59,6 +59,7 @@ use crate::animation::{Animation, Clock};
 use crate::input::swipe_tracker::SwipeTracker;
 use crate::layout::scrolling::ScrollDirection;
 use crate::niri_render_elements;
+use crate::render_helpers::blur::element::BlurRenderElement;
 use crate::render_helpers::blur::EffectsFramebuffers;
 use crate::render_helpers::offscreen::OffscreenData;
 use crate::render_helpers::renderer::NiriRenderer;
@@ -73,6 +74,9 @@ use crate::utils::{
     round_logical_in_physical_max1, ResizeEdge,
 };
 use crate::window::ResolvedWindowRules;
+use std::cell::RefCell;
+
+type EffectsFramebufffersUserData = Rc<RefCell<EffectsFramebuffers>>;
 
 pub mod closing_window;
 pub mod floating;
@@ -113,6 +117,7 @@ niri_render_elements! {
     LayoutElementRenderElement<R> => {
         Wayland = WaylandSurfaceRenderElement<R>,
         SolidColor = SolidColorRenderElement,
+        Blur = BlurRenderElement,
     }
 }
 
@@ -160,6 +165,7 @@ pub trait LayoutElement {
         scale: Scale<f64>,
         alpha: f32,
         target: RenderTarget,
+        fx_buffers: Option<EffectsFramebufffersUserData>,
     ) -> SplitElements<LayoutElementRenderElement<R>>;
 
     /// Renders the non-popup parts of the element.
@@ -171,7 +177,8 @@ pub trait LayoutElement {
         alpha: f32,
         target: RenderTarget,
     ) -> Vec<LayoutElementRenderElement<R>> {
-        self.render(renderer, location, scale, alpha, target).normal
+        self.render(renderer, location, scale, alpha, target, None)
+            .normal
     }
 
     /// Renders the popups of the element.
@@ -183,7 +190,8 @@ pub trait LayoutElement {
         alpha: f32,
         target: RenderTarget,
     ) -> Vec<LayoutElementRenderElement<R>> {
-        self.render(renderer, location, scale, alpha, target).popups
+        self.render(renderer, location, scale, alpha, target, None)
+            .popups
     }
 
     /// Requests the element to change its size.
