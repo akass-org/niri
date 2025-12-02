@@ -282,13 +282,13 @@ fn draw_true_blur(
         Uniform::new("alpha", alpha),
         Uniform::new("noise", config.noise.0 as f32),
         Uniform::new("corner_radius", corner_radius),
-        Uniform::new(
-            "output_size",
-            [
-                fx_buffers.output_size.w as f32,
-                fx_buffers.output_size.h as f32,
-            ],
-        ),
+        // Uniform::new(
+        //     "output_size",
+        //     [
+        //         fx_buffers.output_size.w as f32,
+        //         fx_buffers.output_size.h as f32,
+        //     ],
+        // ),
         Uniform::new(
             "ignore_alpha",
             if alpha_tex.is_some() {

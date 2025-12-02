@@ -27,7 +27,7 @@ uniform float alpha;
 varying vec2 v_coords;
 
 uniform vec4 geo;
-uniform vec2 output_size;
+// uniform vec2 output_size;
 uniform float corner_radius;
 uniform float noise;
 uniform float ignore_alpha;
@@ -75,7 +75,10 @@ void main() {
 
     // Alpha测试
     float alpha_value = texture2D(alpha_tex, v_coords).a;
-    
+
+    // 圆角
+    float radius_flag = step(0.0, corner_radius);  // 更清晰的标志
+
     // 正确的无分支alpha剔除
     // step(ignore_alpha, alpha_value): 当alpha_value>ignore_alpha时返回1
     float alphaMask = step(ignore_alpha, alpha_value);
@@ -88,10 +91,8 @@ void main() {
     float noise_contrib = (noiseHash - 0.5) * noise;
     color.rgb += noise_contrib * alphaMask;  // 用alphaMask控制
 
-    // 圆角
-    float radius_flag = step(0.0, corner_radius);  // 更清晰的标志
     float round_alpha = fast_rounding_alpha(loc, size, corner_radius);
-    // color.a *= mix(1.0, round_alpha, radius_flag) * alpha * alphaMask;
+    
     color *= round_alpha * radius_flag;
     color *= alpha;
     color *= alphaMask;

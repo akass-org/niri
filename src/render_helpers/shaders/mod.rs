@@ -105,7 +105,7 @@ impl Shaders {
             .compile_custom_texture_shader(
                 include_str!("blur_finish.frag"),
                 &[
-                    UniformName::new("output_size", UniformType::_2f),
+                    // UniformName::new("output_size", UniformType::_2f),
                     UniformName::new("corner_radius", UniformType::_1f),
                     UniformName::new("alpha", UniformType::_1f),
                     UniformName::new("noise", UniformType::_1f),
