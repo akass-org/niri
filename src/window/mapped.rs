@@ -799,7 +799,7 @@ impl LayoutElement for Mapped {
             let surface = self.toplevel().wl_surface();
             for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
                 let offset = self.window.geometry().loc + popup_offset - popup.geometry().loc;
-                let size = popup.geometry().size.to_f64();
+                // let size = popup.geometry().size.to_f64();
 
                 rv.extend(render_elements_from_surface_tree(
                     renderer,

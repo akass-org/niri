@@ -256,7 +256,7 @@ fn draw_true_blur(
             gl,
             &mut *fx_buffers,
             &shaders,
-            &config,
+            config.clone(),
             projection_matrix,
             scale as i32,
             &vbos,
