@@ -1319,8 +1319,7 @@ impl<W: LayoutElement> Tile<W> {
             .then(|| self.focus_ring.render(renderer, location).map(Into::into));
         let rv = rv.chain(elem.into_iter().flatten());
 
-        let blur_element = blur_config
-            .on
+        let blur_element = (blur_config.on && win_alpha < 1.)
             .then(|| {
                 let blur_sample_area =
                     Rectangle::new(real_location + window_loc, animated_window_size);
