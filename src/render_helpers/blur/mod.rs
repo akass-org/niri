@@ -715,7 +715,7 @@ fn render_blur_pass_with_frame(
             ffi::FALSE,
             tex_mat.as_ref() as *const f32,
         );
-        gl.Uniform1f(program.uniform_alpha, 1.0);
+        // gl.Uniform1f(program.uniform_alpha, 1.0);
         gl.Uniform1f(program.uniform_radius, config.radius.0 as f32);
         gl.Uniform2f(program.uniform_half_pixel, half_pixel[0], half_pixel[1]);
 
@@ -892,7 +892,7 @@ unsafe fn render_blur_pass_with_gl(
             ffi::FALSE,
             tex_mat.as_ref() as *const f32,
         );
-        gl.Uniform1f(program.uniform_alpha, 1.0);
+        // gl.Uniform1f(program.uniform_alpha, 1.0);
         gl.Uniform1f(
             program.uniform_radius,
             if i == 0 { 0.0 } else { config.radius.0 as f32 },

@@ -86,7 +86,7 @@ impl BlurShader {
             let tex = c"tex";
             let matrix = c"matrix";
             let tex_matrix = c"tex_matrix";
-            let alpha = c"alpha";
+            // let alpha = c"alpha";
             let radius = c"radius";
             let half_pixel = c"half_pixel";
 
@@ -101,8 +101,8 @@ impl BlurShader {
                         program,
                         tex_matrix.as_ptr() as *const ffi::types::GLchar,
                     ),
-                    uniform_alpha: gl
-                        .GetUniformLocation(program, alpha.as_ptr() as *const ffi::types::GLchar),
+                    // uniform_alpha: gl
+                    //     .GetUniformLocation(program, alpha.as_ptr() as *const ffi::types::GLchar),
                     uniform_radius: gl
                         .GetUniformLocation(program, radius.as_ptr() as *const ffi::types::GLchar),
                     uniform_half_pixel: gl.GetUniformLocation(
@@ -130,10 +130,10 @@ impl BlurShader {
                         debug_program,
                         tex_matrix.as_ptr() as *const ffi::types::GLchar,
                     ),
-                    uniform_alpha: gl.GetUniformLocation(
-                        debug_program,
-                        alpha.as_ptr() as *const ffi::types::GLchar,
-                    ),
+                    // uniform_alpha: gl.GetUniformLocation(
+                    //     debug_program,
+                    //     alpha.as_ptr() as *const ffi::types::GLchar,
+                    // ),
                     uniform_radius: gl.GetUniformLocation(
                         debug_program,
                         radius.as_ptr() as *const ffi::types::GLchar,
@@ -173,7 +173,7 @@ pub struct BlurShaderProgram {
     pub(super) uniform_tex: ffi::types::GLint,
     pub(super) uniform_tex_matrix: ffi::types::GLint,
     pub(super) uniform_matrix: ffi::types::GLint,
-    pub(super) uniform_alpha: ffi::types::GLint,
+    // pub(super) uniform_alpha: ffi::types::GLint,
     pub(super) uniform_radius: ffi::types::GLint,
     pub(super) uniform_half_pixel: ffi::types::GLint,
     pub(super) attrib_vert: ffi::types::GLint,

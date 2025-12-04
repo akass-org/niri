@@ -23,7 +23,7 @@ uniform samplerExternalOES alpha_tex;
 uniform sampler2D alpha_tex;
 #endif
 
-uniform float alpha;
+// uniform float alpha;
 varying vec2 v_coords;
 
 uniform vec4 geo;
@@ -94,7 +94,7 @@ void main() {
     float round_alpha = fast_rounding_alpha(loc, size, corner_radius);
     
     color *= round_alpha * radius_flag;
-    color *= alpha;
+    // color *= alpha;
     color *= alphaMask;
 
     gl_FragColor = color;
