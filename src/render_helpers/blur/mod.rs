@@ -621,153 +621,153 @@ fn render_blur_pass_with_frame(
 ) -> anyhow::Result<()> {
     // We use a texture render element with a custom GlesTexProgram in order todo the blurring
     // At least this is what swayfx/scenefx do, but they just use gl calls directly.
-    let size = sample_buffer.size().to_logical(1, Transform::Normal);
+    // let size = sample_buffer.size().to_logical(1, Transform::Normal);
 
-    let vbos = RendererData::get(renderer).vbos;
-    let is_shared = renderer.egl_context().is_shared();
+    // let vbos = RendererData::get(renderer).vbos;
+    // let is_shared = renderer.egl_context().is_shared();
 
-    let mut fb = renderer.bind(render_buffer)?;
-    // Using GlesFrame since I want to use a custom program
-    let mut frame = renderer
-        .render(&mut fb, size.to_physical(1), Transform::Normal)
-        .context("failed to create frame")?;
+    // let mut fb = renderer.bind(render_buffer)?;
+    // // Using GlesFrame since I want to use a custom program
+    // let mut frame = renderer
+    //     .render(&mut fb, size.to_physical(1), Transform::Normal)
+    //     .context("failed to create frame")?;
 
-    let supports_instaning = frame.capabilities().contains(&Capability::Instancing);
-    let debug = !frame.debug_flags().is_empty();
-    let projection = Mat3::from_cols_array(frame.projection());
+    // let supports_instaning = frame.capabilities().contains(&Capability::Instancing);
+    // let debug = !frame.debug_flags().is_empty();
+    // let projection = Mat3::from_cols_array(frame.projection());
 
-    let tex_size = sample_buffer.size();
-    let src = Rectangle::from_size(sample_buffer.size()).to_f64();
-    let dst = Rectangle::from_size(size).to_physical(1);
+    // let tex_size = sample_buffer.size();
+    // let src = Rectangle::from_size(sample_buffer.size()).to_f64();
+    // let dst = Rectangle::from_size(size).to_physical(1);
 
-    frame.with_context(|gl| unsafe {
-        // We are doing basically what Frame::render_texture_from_to does, but our own shader struct
-        // instead. This allows me to get into the gl plumbing.
+    // frame.with_context(|gl| unsafe {
+    //     // We are doing basically what Frame::render_texture_from_to does, but our own shader struct
+    //     // instead. This allows me to get into the gl plumbing.
 
-        // NOTE: We are rendering at the origin of the texture, no need to translate
-        let mut mat = Mat3::IDENTITY;
-        let src_size = sample_buffer.size().to_f64();
+    //     // NOTE: We are rendering at the origin of the texture, no need to translate
+    //     let mut mat = Mat3::IDENTITY;
+    //     let src_size = sample_buffer.size().to_f64();
 
-        if tex_size.is_empty() || src_size.is_empty() {
-            return Ok(());
-        }
+    //     if tex_size.is_empty() || src_size.is_empty() {
+    //         return Ok(());
+    //     }
 
-        let mut tex_mat = build_texture_mat(src, dst, tex_size, Transform::Normal);
-        if sample_buffer.is_y_inverted() {
-            tex_mat *= Mat3::from_cols_array(&[1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0]);
-        }
+    //     let mut tex_mat = build_texture_mat(src, dst, tex_size, Transform::Normal);
+    //     if sample_buffer.is_y_inverted() {
+    //         tex_mat *= Mat3::from_cols_array(&[1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0]);
+    //     }
 
-        // NOTE: We know that this texture is always opaque so skip on some logic checks and
-        // directly render. The following code is from GlesRenderer::render_texture
-        gl.Disable(ffi::BLEND);
+    //     // NOTE: We know that this texture is always opaque so skip on some logic checks and
+    //     // directly render. The following code is from GlesRenderer::render_texture
+    //     gl.Disable(ffi::BLEND);
 
-        // Since we are just rendering onto the offsreen buffer, the vertices to draw are only 4
-        let damage = [
-            dst.loc.x as f32,
-            dst.loc.y as f32,
-            dst.size.w as f32,
-            dst.size.h as f32,
-        ];
+    //     // Since we are just rendering onto the offsreen buffer, the vertices to draw are only 4
+    //     let damage = [
+    //         dst.loc.x as f32,
+    //         dst.loc.y as f32,
+    //         dst.size.w as f32,
+    //         dst.size.h as f32,
+    //     ];
 
-        let mut vertices = Vec::with_capacity(4);
-        let damage_len = if supports_instaning {
-            vertices.extend(damage);
-            vertices.len() / 4
-        } else {
-            for _ in 0..6 {
-                // Add the 4 f32s per damage rectangle for each of the 6 vertices.
-                vertices.extend_from_slice(&damage);
-            }
+    //     let mut vertices = Vec::with_capacity(4);
+    //     let damage_len = if supports_instaning {
+    //         vertices.extend(damage);
+    //         vertices.len() / 4
+    //     } else {
+    //         for _ in 0..6 {
+    //             // Add the 4 f32s per damage rectangle for each of the 6 vertices.
+    //             vertices.extend_from_slice(&damage);
+    //         }
 
-            1
-        };
+    //         1
+    //     };
 
-        mat *= projection;
+    //     mat *= projection;
 
-        // SAFETY: internal texture should always have a format
-        // We also use Abgr8888 which is known and confirmed
-        let (internal_format, _, _) =
-            fourcc_to_gl_formats(sample_buffer.format().unwrap()).unwrap();
-        let variant = blur_program.variant_for_format(Some(internal_format), false);
+    //     // SAFETY: internal texture should always have a format
+    //     // We also use Abgr8888 which is known and confirmed
+    //     let (internal_format, _, _) =
+    //         fourcc_to_gl_formats(sample_buffer.format().unwrap()).unwrap();
+    //     let variant = blur_program.variant_for_format(Some(internal_format), false);
 
-        let program = if debug {
-            &variant.debug
-        } else {
-            &variant.normal
-        };
+    //     let program = if debug {
+    //         &variant.debug
+    //     } else {
+    //         &variant.normal
+    //     };
 
-        gl.ActiveTexture(ffi::TEXTURE0);
-        gl.BindTexture(ffi::TEXTURE_2D, sample_buffer.tex_id());
-        gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
-        gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
-        gl.UseProgram(program.program);
+    //     gl.ActiveTexture(ffi::TEXTURE0);
+    //     gl.BindTexture(ffi::TEXTURE_2D, sample_buffer.tex_id());
+    //     gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
+    //     gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
+    //     gl.UseProgram(program.program);
 
-        gl.Uniform1i(program.uniform_tex, 0);
-        gl.UniformMatrix3fv(
-            program.uniform_matrix,
-            1,
-            ffi::FALSE,
-            mat.as_ref() as *const f32,
-        );
-        gl.UniformMatrix3fv(
-            program.uniform_tex_matrix,
-            1,
-            ffi::FALSE,
-            tex_mat.as_ref() as *const f32,
-        );
-        // gl.Uniform1f(program.uniform_alpha, 1.0);
-        gl.Uniform1f(program.uniform_radius, config.radius.0 as f32);
-        gl.Uniform2f(program.uniform_half_pixel, half_pixel[0], half_pixel[1]);
+    //     gl.Uniform1i(program.uniform_tex, 0);
+    //     gl.UniformMatrix3fv(
+    //         program.uniform_matrix,
+    //         1,
+    //         ffi::FALSE,
+    //         mat.as_ref() as *const f32,
+    //     );
+    //     gl.UniformMatrix3fv(
+    //         program.uniform_tex_matrix,
+    //         1,
+    //         ffi::FALSE,
+    //         tex_mat.as_ref() as *const f32,
+    //     );
+    //     // gl.Uniform1f(program.uniform_alpha, 1.0);
+    //     gl.Uniform1f(program.uniform_radius, config.radius.0 as f32);
+    //     gl.Uniform2f(program.uniform_half_pixel, half_pixel[0], half_pixel[1]);
 
-        gl.EnableVertexAttribArray(program.attrib_vert as u32);
-        gl.BindBuffer(ffi::ARRAY_BUFFER, vbos[0]);
-        gl.VertexAttribPointer(
-            program.attrib_vert as u32,
-            2,
-            ffi::FLOAT,
-            ffi::FALSE,
-            0,
-            std::ptr::null(),
-        );
+    //     gl.EnableVertexAttribArray(program.attrib_vert as u32);
+    //     gl.BindBuffer(ffi::ARRAY_BUFFER, vbos[0]);
+    //     gl.VertexAttribPointer(
+    //         program.attrib_vert as u32,
+    //         2,
+    //         ffi::FLOAT,
+    //         ffi::FALSE,
+    //         0,
+    //         std::ptr::null(),
+    //     );
 
-        // vert_position
-        gl.EnableVertexAttribArray(program.attrib_vert_position as u32);
-        gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
+    //     // vert_position
+    //     gl.EnableVertexAttribArray(program.attrib_vert_position as u32);
+    //     gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
 
-        gl.VertexAttribPointer(
-            program.attrib_vert_position as u32,
-            4,
-            ffi::FLOAT,
-            ffi::FALSE,
-            0,
-            vertices.as_ptr() as *const _,
-        );
+    //     gl.VertexAttribPointer(
+    //         program.attrib_vert_position as u32,
+    //         4,
+    //         ffi::FLOAT,
+    //         ffi::FALSE,
+    //         0,
+    //         vertices.as_ptr() as *const _,
+    //     );
 
-        if supports_instaning {
-            gl.VertexAttribDivisor(program.attrib_vert as u32, 0);
-            gl.VertexAttribDivisor(program.attrib_vert_position as u32, 1);
-            gl.DrawArraysInstanced(ffi::TRIANGLE_STRIP, 0, 4, damage_len as i32);
-        } else {
-            let count = damage_len * 6;
-            gl.DrawArrays(ffi::TRIANGLES, 0, count as i32);
-        }
+    //     if supports_instaning {
+    //         gl.VertexAttribDivisor(program.attrib_vert as u32, 0);
+    //         gl.VertexAttribDivisor(program.attrib_vert_position as u32, 1);
+    //         gl.DrawArraysInstanced(ffi::TRIANGLE_STRIP, 0, 4, damage_len as i32);
+    //     } else {
+    //         let count = damage_len * 6;
+    //         gl.DrawArrays(ffi::TRIANGLES, 0, count as i32);
+    //     }
 
-        gl.BindTexture(ffi::TEXTURE_2D, 0);
-        gl.DisableVertexAttribArray(program.attrib_vert as u32);
-        gl.DisableVertexAttribArray(program.attrib_vert_position as u32);
+    //     gl.BindTexture(ffi::TEXTURE_2D, 0);
+    //     gl.DisableVertexAttribArray(program.attrib_vert as u32);
+    //     gl.DisableVertexAttribArray(program.attrib_vert_position as u32);
 
-        gl.Enable(ffi::BLEND);
-        gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA);
+    //     gl.Enable(ffi::BLEND);
+    //     gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA);
 
-        // FIXME: Check for Fencing support
-        if is_shared {
-            gl.Finish();
-        }
+    //     // FIXME: Check for Fencing support
+    //     if is_shared {
+    //         gl.Finish();
+    //     }
 
-        Result::<_, GlesError>::Ok(())
-    })??;
+    //     Result::<_, GlesError>::Ok(())
+    // })??;
 
-    let _sync_point = frame.finish()?;
+    // let _sync_point = frame.finish()?;
 
     Ok(())
 }
