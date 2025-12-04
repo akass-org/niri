@@ -21,7 +21,7 @@ use smithay::reexports::gbm::Format;
 use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::shell::wlr_layer::Layer;
 
-use crate::render_helpers::renderer::NiriRenderer;
+use crate::render_helpers::renderer::{AsGlesRenderer, NiriRenderer};
 use shader::BlurShaders;
 
 use super::render_data::RendererData;
@@ -61,8 +61,8 @@ pub struct EffectsFramebuffers {
     // /// Contains the original pixels before blurring to draw with in case of artifacts.
     // blur_saved_pixels: GlesTexture,
     // The blur algorithms (dual-kawase) swaps between these two whenever scaling the image
-    effects: GlesTexture,
-    effects_swapped: GlesTexture,
+    // effects: GlesTexture,
+    // effects_swapped: GlesTexture,
     /// The buffer we are currently rendering/sampling from.
     ///
     /// In order todo the up/downscaling, we render into different buffers. On each pass, we render
@@ -70,11 +70,15 @@ pub struct EffectsFramebuffers {
     ///
     /// One exception is that if we are on the first pass, we are on [`CurrentBuffer::Initial`], we
     /// are sampling from [`Self::blit_buffer`] from initial screen contents.
-    current_buffer: CurrentBuffer,
+    // current_buffer: CurrentBuffer,
     /// Size of the output that this object runs on.
     output_size: Size<i32, Physical>,
     /// Transform of the output.
     transform: Transform,
+
+    sample_effects: Vec<GlesTexture>,
+
+    sample_fbos: Vec<u32>,
 }
 
 type EffectsFramebufffersUserData = Rc<RefCell<EffectsFramebuffers>>;
@@ -127,14 +131,51 @@ impl EffectsFramebuffers {
             )
         }
 
+        let mut sample_effects: Vec<GlesTexture> = Vec::new();
+        let mut sample_fbos: Vec<u32> = Vec::new();
+        for i in 0..8 {
+            let size = if i == 0 {
+                texture_size
+            } else {
+                texture_size / (2 as i32).pow(i - 1)
+            };
+            let sample_effect = create_buffer(renderer, size).unwrap();
+            sample_effects.push(sample_effect.clone());
+
+            renderer.with_context(|gl| unsafe {
+                let mut sample_fbo = 0;
+                {
+                    gl.GenFramebuffers(1, &mut sample_fbo as *mut _);
+                    gl.BindFramebuffer(ffi::FRAMEBUFFER, sample_fbo);
+                    gl.FramebufferTexture2D(
+                        ffi::FRAMEBUFFER,
+                        ffi::COLOR_ATTACHMENT0,
+                        ffi::TEXTURE_2D,
+                        sample_effect.tex_id(),
+                        0,
+                    );
+
+                    let status = gl.CheckFramebufferStatus(ffi::FRAMEBUFFER);
+                    if status != ffi::FRAMEBUFFER_COMPLETE {
+                        return Err(GlesError::FramebufferBindingError);
+                    }
+                };
+                gl.BindFramebuffer(ffi::FRAMEBUFFER, 0);
+                sample_fbos.push(sample_fbo);
+                Result::<_, GlesError>::Ok(())
+            });
+        }
+
         let this = EffectsFramebuffers {
             optimized_blur: create_buffer(renderer, texture_size).unwrap(),
             optimized_blur_rerender_at: get_rerender_at(),
-            effects: create_buffer(renderer, texture_size).unwrap(),
-            effects_swapped: create_buffer(renderer, texture_size).unwrap(),
-            current_buffer: CurrentBuffer::Normal,
+            // effects: create_buffer(renderer, texture_size).unwrap(),
+            // effects_swapped: create_buffer(renderer, texture_size).unwrap(),
+            // current_buffer: CurrentBuffer::Normal,
             transform,
             output_size: texture_size,
+            sample_effects,
+            sample_fbos,
         };
 
         let user_data = output.user_data();
@@ -167,14 +208,51 @@ impl EffectsFramebuffers {
             )
         }
 
+        let mut sample_effects: Vec<GlesTexture> = Vec::new();
+        let mut sample_fbos: Vec<u32> = Vec::new();
+        for i in 0..8 {
+            let size = if i == 0 {
+                texture_size
+            } else {
+                texture_size / (2 as i32).pow(i - 1)
+            };
+            let sample_effect = create_buffer(renderer, size).unwrap();
+            sample_effects.push(sample_effect.clone());
+
+            renderer.with_context(|gl| unsafe {
+                let mut sample_fbo = 0;
+                {
+                    gl.GenFramebuffers(1, &mut sample_fbo as *mut _);
+                    gl.BindFramebuffer(ffi::FRAMEBUFFER, sample_fbo);
+                    gl.FramebufferTexture2D(
+                        ffi::FRAMEBUFFER,
+                        ffi::COLOR_ATTACHMENT0,
+                        ffi::TEXTURE_2D,
+                        sample_effect.tex_id(),
+                        0,
+                    );
+
+                    let status = gl.CheckFramebufferStatus(ffi::FRAMEBUFFER);
+                    if status != ffi::FRAMEBUFFER_COMPLETE {
+                        return Err(GlesError::FramebufferBindingError);
+                    }
+                };
+                gl.BindFramebuffer(ffi::FRAMEBUFFER, 0);
+                sample_fbos.push(sample_fbo);
+                Result::<_, GlesError>::Ok(())
+            });
+        }
+
         *fx_buffers = EffectsFramebuffers {
             optimized_blur: create_buffer(renderer, texture_size)?,
             optimized_blur_rerender_at: get_rerender_at(),
-            effects: create_buffer(renderer, texture_size)?,
-            effects_swapped: create_buffer(renderer, texture_size)?,
-            current_buffer: CurrentBuffer::Normal,
+            // effects: create_buffer(renderer, texture_size)?,
+            // effects_swapped: create_buffer(renderer, texture_size)?,
+            // current_buffer: CurrentBuffer::Normal,
             transform,
             output_size: texture_size,
+            sample_effects,
+            sample_fbos,
         };
 
         Ok(())
@@ -189,114 +267,147 @@ impl EffectsFramebuffers {
         scale: Scale<f64>,
         config: Blur,
     ) -> anyhow::Result<()> {
-        if self.optimized_blur_rerender_at.is_none() {
-            return Ok(());
-        }
+        // if self.optimized_blur_rerender_at.is_none() {
+        //     return Ok(());
+        // }
 
-        if self.optimized_blur_rerender_at.unwrap() > Instant::now() {
-            return Ok(());
-        }
+        // if self.optimized_blur_rerender_at.unwrap() > Instant::now() {
+        //     return Ok(());
+        // }
 
-        self.optimized_blur_rerender_at = None;
+        // self.optimized_blur_rerender_at = None;
 
-        // first render layer shell elements
-        // NOTE: We use Blur::DISABLED since we should not include blur with Background/Bottom
-        // layer shells
+        // // first render layer shell elements
+        // // NOTE: We use Blur::DISABLED since we should not include blur with Background/Bottom
+        // // layer shells
 
-        let mut elements = vec![];
-        for layer in layer_map
-            .layers_on(Layer::Background)
-            .chain(layer_map.layers_on(Layer::Bottom))
-            .rev()
-        {
-            let layer_geo = layer_map.layer_geometry(layer).unwrap();
-            let location = layer_geo.loc.to_physical_precise_round(scale);
-            elements.extend(
-                layer.render_elements::<WaylandSurfaceRenderElement<_>>(
-                    renderer, location, scale, 1.0,
-                ),
-            );
-        }
+        // let mut elements = vec![];
+        // for layer in layer_map
+        //     .layers_on(Layer::Background)
+        //     .chain(layer_map.layers_on(Layer::Bottom))
+        //     .rev()
+        // {
+        //     let layer_geo = layer_map.layer_geometry(layer).unwrap();
+        //     let location = layer_geo.loc.to_physical_precise_round(scale);
+        //     elements.extend(
+        //         layer.render_elements::<WaylandSurfaceRenderElement<_>>(
+        //             renderer, location, scale, 1.0,
+        //         ),
+        //     );
+        // }
 
-        let mut fb = renderer.bind(&mut self.effects).unwrap();
-        let output_size = output.current_mode().unwrap().size;
+        // let mut fb = renderer.bind(&mut self.effects).unwrap();
+        // let output_size = output.current_mode().unwrap().size;
 
-        let _ = render_elements(
-            renderer,
-            &mut fb,
-            output_size,
-            scale,
-            Transform::Normal,
-            elements.iter(),
-        )
-        .expect("failed to render for optimized blur buffer");
-        drop(fb);
+        // let _ = render_elements(
+        //     renderer,
+        //     &mut fb,
+        //     output_size,
+        //     scale,
+        //     Transform::Normal,
+        //     elements.iter(),
+        // )
+        // .expect("failed to render for optimized blur buffer");
+        // drop(fb);
 
-        self.current_buffer = CurrentBuffer::Normal;
+        // self.current_buffer = CurrentBuffer::Normal;
 
-        let shaders = Shaders::get(renderer).blur.clone();
+        // let shaders = Shaders::get(renderer).blur.clone();
 
-        // NOTE: If we only do one pass its kinda ugly, there must be at least
-        // n=2 passes in order to have good sampling
-        let half_pixel = [
-            0.5 / (output_size.w as f32 / 2.0),
-            0.5 / (output_size.h as f32 / 2.0),
-        ];
+        // // NOTE: If we only do one pass its kinda ugly, there must be at least
+        // // n=2 passes in order to have good sampling
+        // let half_pixel = [
+        //     0.5 / (output_size.w as f32 / 2.0),
+        //     0.5 / (output_size.h as f32 / 2.0),
+        // ];
 
-        for _ in 0..config.passes {
-            let (sample_buffer, render_buffer) = self.buffers();
-            render_blur_pass_with_frame(
-                renderer,
-                sample_buffer,
-                render_buffer,
-                &shaders.down,
-                half_pixel,
-                config,
-            )?;
-            self.current_buffer.swap();
-        }
+        // for _ in 0..config.passes {
+        //     let (sample_buffer, render_buffer) = self.buffers();
+        //     render_blur_pass_with_frame(
+        //         renderer,
+        //         sample_buffer,
+        //         render_buffer,
+        //         &shaders.down,
+        //         half_pixel,
+        //         config,
+        //     )?;
+        //     self.current_buffer.swap();
+        // }
 
-        let half_pixel = [
-            0.5 / (output_size.w as f32 * 2.0),
-            0.5 / (output_size.h as f32 * 2.0),
-        ];
-        // FIXME: Why we need inclusive here but down is exclusive?
-        for _ in 0..config.passes {
-            let (sample_buffer, render_buffer) = self.buffers();
-            render_blur_pass_with_frame(
-                renderer,
-                sample_buffer,
-                render_buffer,
-                &shaders.up,
-                half_pixel,
-                config,
-            )?;
-            self.current_buffer.swap();
-        }
+        // let half_pixel = [
+        //     0.5 / (output_size.w as f32 * 2.0),
+        //     0.5 / (output_size.h as f32 * 2.0),
+        // ];
+        // // FIXME: Why we need inclusive here but down is exclusive?
+        // for _ in 0..config.passes {
+        //     let (sample_buffer, render_buffer) = self.buffers();
+        //     render_blur_pass_with_frame(
+        //         renderer,
+        //         sample_buffer,
+        //         render_buffer,
+        //         &shaders.up,
+        //         half_pixel,
+        //         config,
+        //     )?;
+        //     self.current_buffer.swap();
+        // }
 
-        // Now blit from the last render buffer into optimized_blur
-        // We are already bound so its just a blit
-        let tex_fb = renderer.bind(&mut self.effects).unwrap();
-        let mut optimized_blur_fb = renderer.bind(&mut self.optimized_blur).unwrap();
+        // // Now blit from the last render buffer into optimized_blur
+        // // We are already bound so its just a blit
+        // let tex_fb = renderer.bind(&mut self.effects).unwrap();
+        // let mut optimized_blur_fb = renderer.bind(&mut self.optimized_blur).unwrap();
 
-        renderer.blit(
-            &tex_fb,
-            &mut optimized_blur_fb,
-            Rectangle::from_size(output_size),
-            Rectangle::from_size(output_size),
-            TextureFilter::Linear,
-        )?;
+        // renderer.blit(
+        //     &tex_fb,
+        //     &mut optimized_blur_fb,
+        //     Rectangle::from_size(output_size),
+        //     Rectangle::from_size(output_size),
+        //     TextureFilter::Linear,
+        // )?;
 
         Ok(())
     }
 
     /// Get the sample and render buffers.
-    pub fn buffers(&mut self) -> (&GlesTexture, &mut GlesTexture) {
-        match self.current_buffer {
-            CurrentBuffer::Normal => (&self.effects, &mut self.effects_swapped),
-            CurrentBuffer::Swapped => (&self.effects_swapped, &mut self.effects),
-        }
+    // pub fn buffers(&mut self) -> (&GlesTexture, &mut GlesTexture) {
+    //     match self.current_buffer {
+    //         CurrentBuffer::Normal => (&self.effects, &mut self.effects_swapped),
+    //         CurrentBuffer::Swapped => (&self.effects_swapped, &mut self.effects),
+    //     }
+    // }
+
+    pub fn sample_buffers(&mut self, i: usize) -> (&GlesTexture, &mut GlesTexture, u32) {
+        let (left, right) = self.sample_effects.split_at_mut(i + 1);
+        (&left[i], &mut right[0], *self.sample_fbos.get(i).unwrap())
     }
+
+    pub fn sample_buffers_rev(&mut self, i: usize) -> (&mut GlesTexture, &GlesTexture, u32) {
+        let (left, right) = self.sample_effects.split_at_mut(i + 1);
+        (
+            &mut left[i],
+            &right[0],
+            *self.sample_fbos.get(i + 1).unwrap(),
+        )
+    }
+
+    pub fn sample_fbo(&mut self, i: usize) -> u32 {
+        *self.sample_fbos.get(i).unwrap()
+    }
+
+    // pub fn sample_buffers_rev(&mut self, i: usize) -> (&GlesTexture, &mut GlesTexture) {
+    //     let len = self.sample_effects.len();
+    //     assert!(i + 1 < len);
+
+    //     // r0 = len-1-i (当前)
+    //     // r1 = len-2-i (下一个)
+    //     let r0 = len - 1 - i;
+    //     let r1 = len - 2 - i;
+
+    //     // 确保 r1 < r0 以便 split_at_mut 适用
+    //     let (left, right) = self.sample_effects.split_at_mut(r0);
+
+    //     (&right[0], &mut left[r1])
+    // }
 
     pub fn output_size(&self) -> Size<i32, Physical> {
         self.output_size
@@ -322,8 +433,8 @@ pub(super) unsafe fn get_main_buffer_blur(
     is_tty: bool,
     alpha_tex: Option<&GlesTexture>,
 ) -> Result<GlesTexture, GlesError> {
-    let tex_size = fx_buffers
-        .effects
+    // let effects = fx_buffers.sample_effects.get_mut(0).unwrap();
+    let tex_size = fx_buffers.sample_effects[0]
         .size()
         .to_logical(1, Transform::Normal)
         .to_physical(scale);
@@ -340,12 +451,12 @@ pub(super) unsafe fn get_main_buffer_blur(
     let mut prev_fbo = 0;
     gl.GetIntegerv(ffi::FRAMEBUFFER_BINDING, &mut prev_fbo as *mut _);
 
-    let (sample_buffer, _) = fx_buffers.buffers();
+    let (sample_buffer, _, sample_fbo) = fx_buffers.sample_buffers(0);
 
     // First get a fbo for the texture we are about to read into
-    let mut sample_fbo = 0u32;
+    // let mut sample_fbo = 0u32;
     {
-        gl.GenFramebuffers(1, &mut sample_fbo as *mut _);
+        // gl.GenFramebuffers(1, &mut sample_fbo as *mut _);
         gl.BindFramebuffer(ffi::DRAW_FRAMEBUFFER, sample_fbo);
         gl.FramebufferTexture2D(
             ffi::FRAMEBUFFER,
@@ -357,7 +468,7 @@ pub(super) unsafe fn get_main_buffer_blur(
         gl.Clear(ffi::COLOR_BUFFER_BIT);
         let status = gl.CheckFramebufferStatus(ffi::FRAMEBUFFER);
         if status != ffi::FRAMEBUFFER_COMPLETE {
-            gl.DeleteFramebuffers(1, &mut sample_fbo as *mut _);
+            // gl.DeleteFramebuffers(1, &mut sample_fbo as *mut _);
             return Err(GlesError::FramebufferBindingError);
         }
     }
@@ -428,14 +539,17 @@ pub(super) unsafe fn get_main_buffer_blur(
     }
 
     {
-        let passes = blur_config.passes;
-        let half_pixel = [
-            0.5 / (tex_size.w as f32 / 2.0),
-            0.5 / (tex_size.h as f32 / 2.0),
-        ];
+        let mut passes = blur_config.passes.clamp(0, 8) as usize;
+
+        // let half_pixel = [
+        //     0.5 / (tex_size.w as f32 / 2.0),
+        //     0.5 / (tex_size.h as f32 / 2.0),
+        // ];
         for i in 0..passes {
-            let (sample_buffer, render_buffer) = fx_buffers.buffers();
+            let (sample_buffer, render_buffer, render_buffer_fbo) = fx_buffers.sample_buffers(i);
             let damage = dst_expanded.downscale(1 << (i + 1));
+            let tex_size_down = sample_buffer.size(); // 当前 FBO 尺寸
+            let half_pixel = [0.5 / tex_size_down.w as f32, 0.5 / tex_size_down.h as f32];
             render_blur_pass_with_gl(
                 gl,
                 vbos,
@@ -449,17 +563,23 @@ pub(super) unsafe fn get_main_buffer_blur(
                 half_pixel,
                 blur_config.clone(),
                 damage,
+                render_buffer_fbo,
+                i,
             )?;
-            fx_buffers.current_buffer.swap();
+            // fx_buffers.current_buffer.swap();
         }
 
-        let half_pixel = [
-            0.5 / (tex_size.w as f32 * 2.0),
-            0.5 / (tex_size.h as f32 * 2.0),
-        ];
-        for i in 0..passes {
-            let (sample_buffer, render_buffer) = fx_buffers.buffers();
+        // let half_pixel = [
+        //     0.5 / (tex_size.w as f32 * 2.0),
+        //     0.5 / (tex_size.h as f32 * 2.0),
+        // ];
+        for i in (0..passes).rev() {
+            // let (sample_buffer, render_buffer) = fx_buffers.buffers();
+            let (render_buffer, sample_buffer, render_buffer_fbo) =
+                fx_buffers.sample_buffers_rev(i);
             let damage = dst_expanded.downscale(1 << (passes - 1 - i));
+            let tex_size_down = sample_buffer.size(); // 当前 FBO 尺寸
+            let half_pixel = [0.5 / tex_size_down.w as f32, 0.5 / tex_size_down.h as f32];
             render_blur_pass_with_gl(
                 gl,
                 &vbos,
@@ -473,18 +593,20 @@ pub(super) unsafe fn get_main_buffer_blur(
                 half_pixel,
                 blur_config.clone(),
                 damage,
+                render_buffer_fbo,
+                i,
             )?;
-            fx_buffers.current_buffer.swap();
+            // fx_buffers.current_buffer.swap();
         }
     }
 
     // Cleanup
     {
-        gl.DeleteFramebuffers(1, &mut sample_fbo as *mut _);
+        // gl.DeleteFramebuffers(1, &mut sample_fbo as *mut _);
         gl.BindFramebuffer(ffi::FRAMEBUFFER, prev_fbo as u32);
     }
 
-    Ok(fx_buffers.effects.clone())
+    Ok(fx_buffers.sample_effects[0].clone())
 }
 
 // Renders a blur pass using a GlesFrame with syncing and fencing provided by smithay. Used for
@@ -672,6 +794,8 @@ unsafe fn render_blur_pass_with_gl(
     // dst is the region that should have blur
     // it gets up/downscaled with passes
     _damage: Rectangle<i32, Physical>,
+    render_buffer_fbo: u32,
+    i: usize,
 ) -> Result<(), GlesError> {
     let tex_size = sample_buffer.size();
     let src = Rectangle::from_size(tex_size.to_f64());
@@ -690,9 +814,9 @@ unsafe fn render_blur_pass_with_gl(
     // stuff. Complicated.
 
     // First bind to our render buffer
-    let mut render_buffer_fbo = 0;
+    // let mut render_buffer_fbo = 0;
     {
-        gl.GenFramebuffers(1, &mut render_buffer_fbo as *mut _);
+        // gl.GenFramebuffers(1, &mut render_buffer_fbo as *mut _);
         gl.BindFramebuffer(ffi::FRAMEBUFFER, render_buffer_fbo);
         gl.FramebufferTexture2D(
             ffi::FRAMEBUFFER,
@@ -769,7 +893,10 @@ unsafe fn render_blur_pass_with_gl(
             tex_mat.as_ref() as *const f32,
         );
         gl.Uniform1f(program.uniform_alpha, 1.0);
-        gl.Uniform1f(program.uniform_radius, config.radius.0 as f32);
+        gl.Uniform1f(
+            program.uniform_radius,
+            if i == 0 { 0.0 } else { config.radius.0 as f32 },
+        );
         gl.Uniform2f(program.uniform_half_pixel, half_pixel[0], half_pixel[1]);
 
         gl.EnableVertexAttribArray(program.attrib_vert as u32);
@@ -813,7 +940,7 @@ unsafe fn render_blur_pass_with_gl(
     // Clean up
     {
         gl.Enable(ffi::BLEND);
-        gl.DeleteFramebuffers(1, &render_buffer_fbo as *const _);
+        // gl.DeleteFramebuffers(1, &render_buffer_fbo as *const _);
         gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA);
         gl.BindFramebuffer(ffi::FRAMEBUFFER, 0);
     }

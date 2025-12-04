@@ -15,13 +15,16 @@ uniform float radius;
 
 void main() {
     vec2 uv = niri_v_coords / 2.0;
+    if (radius == 0.0) {
+        gl_FragColor = texture2D(tex, uv);
+        return;
+    }
     vec2 offset = half_pixel * radius;
-    vec4 center = texture2D(tex, uv);
-    vec4 horizontal = texture2D(tex, uv + vec2(offset.x, 0.0));
-    horizontal += texture2D(tex, uv + vec2(-offset.x, 0.0));
-    vec4 vertical = texture2D(tex, uv + vec2(0.0, offset.y));
-    vertical += texture2D(tex, uv + vec2(0.0, -offset.y));
+    vec4 sum = texture2D(tex, uv) * 4.0
+        + texture2D(tex, uv + vec2(offset.x, 0.0))
+        + texture2D(tex, uv - vec2(offset.x, 0.0))
+        + texture2D(tex, uv + vec2(0.0, offset.y))
+        + texture2D(tex, uv - vec2(0.0, offset.y));
 
-    // 4次采样：中心 + 水平平均 + 垂直平均
-    gl_FragColor = (center * 2.0 + horizontal + vertical) / 6.0;
+    gl_FragColor = sum * 0.125;
 }

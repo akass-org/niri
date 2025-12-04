@@ -239,7 +239,7 @@ fn draw_true_blur(
     is_tty: bool,
     alpha_tex: Option<&GlesTexture>,
 ) -> Result<(), GlesError> {
-    fx_buffers.current_buffer = CurrentBuffer::Normal;
+    // fx_buffers.current_buffer = CurrentBuffer::Normal;
 
     let shaders = Shaders::get_from_frame(gles_frame).blur.clone();
     let vbos = RendererData::get_from_frame(gles_frame).vbos;
@@ -280,7 +280,7 @@ fn draw_true_blur(
             ],
         ),
         Uniform::new("alpha", alpha),
-        Uniform::new("noise", config.noise.0 as f32),
+        // Uniform::new("noise", config.noise.0 as f32),
         Uniform::new("corner_radius", corner_radius),
         // Uniform::new(
         //     "output_size",
@@ -362,7 +362,7 @@ impl RenderElement<GlesRenderer> for BlurRenderElement {
                                 ],
                             ),
                             Uniform::new("corner_radius", *corner_radius),
-                            Uniform::new("noise", *noise),
+                            // Uniform::new("noise", *noise),
                             Uniform::new("alpha", self.alpha()),
                             Uniform::new("ignore_alpha", 0.),
                         ],

@@ -29,7 +29,7 @@ varying vec2 v_coords;
 uniform vec4 geo;
 // uniform vec2 output_size;
 uniform float corner_radius;
-uniform float noise;
+// uniform float noise;
 uniform float ignore_alpha;
 
 // float rounding_alpha(vec2 coords, vec2 size, float radius) {
@@ -54,17 +54,17 @@ uniform float ignore_alpha;
 float fast_rounding_alpha(vec2 coords, vec2 size, float radius) {
     // 简化版圆角计算
     vec2 dist = abs(coords - size * 0.5) - size * 0.5 + radius;
-    float sdf = length(max(dist, 0.0)) + min(max(dist.x, dist.y), 0.0);
+    float sdf = max(dist.x,0.0) + max(dist.y,0.0) + min(max(dist.x, dist.y), 0.0);
     return 1.0 - smoothstep(radius - 0.5, radius + 0.5, sdf);
 }
 
-// Noise function copied from hyprland.
-// I like the effect it gave, can be tweaked further
-float hash(vec2 p) {
-    vec3 p3 = fract(vec3(p.xyx) * 727.727); // wysi :wink: :wink:
-    p3 += dot(p3, p3.xyz + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
-}
+// // Noise function copied from hyprland.
+// // I like the effect it gave, can be tweaked further
+// float hash(vec2 p) {
+//     vec3 p3 = fract(vec3(p.xyx) * 727.727); // wysi :wink: :wink:
+//     p3 += dot(p3, p3.xyz + 33.33);
+//     return fract((p3.x + p3.y) * p3.z);
+// }
 
 void main() {
     vec4 color = texture2D(tex, v_coords);
@@ -86,10 +86,10 @@ void main() {
     vec2 size = geo.zw;
     vec2 loc = gl_FragCoord.xy - geo.xy;
 
-    // 噪声（只在alpha测试通过时添加）
-    float noiseHash = hash(loc / size);
-    float noise_contrib = (noiseHash - 0.5) * noise;
-    color.rgb += noise_contrib * alphaMask;  // 用alphaMask控制
+    // // 噪声（只在alpha测试通过时添加）
+    // float noiseHash = hash(loc / size);
+    // float noise_contrib = (noiseHash - 0.5) * noise;
+    // color.rgb += noise_contrib * alphaMask;  // 用alphaMask控制
 
     float round_alpha = fast_rounding_alpha(loc, size, corner_radius);
     

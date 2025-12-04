@@ -108,7 +108,7 @@ impl Shaders {
                     // UniformName::new("output_size", UniformType::_2f),
                     UniformName::new("corner_radius", UniformType::_1f),
                     UniformName::new("alpha", UniformType::_1f),
-                    UniformName::new("noise", UniformType::_1f),
+                    // UniformName::new("noise", UniformType::_1f),
                     UniformName::new("geo", UniformType::_4f),
                     UniformName::new("ignore_alpha", UniformType::_1f),
                     UniformName::new("alpha_tex", UniformType::_1i),
