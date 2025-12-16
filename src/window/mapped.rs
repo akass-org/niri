@@ -1,8 +1,9 @@
 use std::cell::{Cell, Ref, RefCell};
 use std::time::Duration;
 
-use niri_config::{Blur, BlurRule, Color, Config, CornerRadius, GradientInterpolation, WindowRule};
+use niri_config::{Blur, Color, Config, CornerRadius, GradientInterpolation, WindowRule};
 use smithay::backend::renderer::element::surface::render_elements_from_surface_tree;
+use smithay::backend::renderer::element::utils::RelocateRenderElement;
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::desktop::space::SpaceElement as _;
@@ -19,6 +20,7 @@ use smithay::wayland::shell::xdg::{
     SurfaceCachedState, ToplevelCachedState, ToplevelConfigure, ToplevelSurface,
     XdgToplevelSurfaceData,
 };
+use crate::niri::OutputRenderElements;
 use wayland_backend::server::Credentials;
 
 use super::{ResolvedWindowRules, WindowRef};
@@ -202,6 +204,7 @@ niri_render_elements! {
         Layout = LayoutElementRenderElement<R>,
         // Blocked-out window with rounded corners.
         Border = BorderRenderElement,
+        RelocatedPointer = RelocateRenderElement<OutputRenderElements<R>>
     }
 }
 
@@ -1179,7 +1182,10 @@ impl LayoutElement for Mapped {
                 x => x,
             };
 
-            if let Some(RequestSizeOnce::WaitingForConfigure) = self.request_size_once {
+            if matches!(
+                self.request_size_once,
+                Some(RequestSizeOnce::WaitingForConfigure)
+            ) {
                 self.request_size_once = Some(RequestSizeOnce::WaitingForCommit(serial));
             }
 
