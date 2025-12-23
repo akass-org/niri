@@ -81,7 +81,7 @@ use smithay::wayland::dmabuf::DmabufState;
 use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
 use smithay::wayland::idle_notify::IdleNotifierState;
-use smithay::wayland::input_method::{InputMethodManagerState, InputMethodSeat};
+use smithay::wayland::input_method::InputMethodManagerState;
 use smithay::wayland::keyboard_shortcuts_inhibit::{
     KeyboardShortcutsInhibitState, KeyboardShortcutsInhibitor,
 };
@@ -1092,21 +1092,8 @@ impl State {
     }
 
     pub fn refresh_popup_grab(&mut self) {
-        let keyboard_grabbed = self.niri.seat.input_method().keyboard_grabbed();
-
         if let Some(grab) = &mut self.niri.popup_grab {
             if grab.grab.has_ended() {
-                self.niri.popup_grab = None;
-            } else if keyboard_grabbed {
-                // HACK: remove popup grab if IME grabbed the keyboard, because we can't yet do
-                // popup grabs together with an IME grab.
-                // FIXME: do this properly.
-                grab.grab.ungrab(PopupUngrabStrategy::All);
-                self.niri.seat.get_pointer().unwrap().unset_grab(
-                    self,
-                    SERIAL_COUNTER.next_serial(),
-                    get_monotonic_time().as_millis() as u32,
-                );
                 self.niri.popup_grab = None;
             }
         }
@@ -4298,7 +4285,7 @@ impl Niri {
         self.layout.update_render_elements(output);
 
         for (out, state) in self.output_state.iter_mut() {
-            if output.map_or(true, |output| out == output) {
+            if output.is_none_or(|output| out == output) {
                 let scale = Scale::from(out.current_scale().fractional_scale());
                 let transform = out.current_transform();
 
