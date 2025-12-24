@@ -1048,11 +1048,18 @@ impl<W: LayoutElement> Tile<W> {
         let win_alpha = if self.window.is_ignoring_opacity_window_rule() {
             1.
         } else {
-            let alpha = self.window.rules().opacity.unwrap_or(1.).clamp(0., 1.);
+            let opacity = self.window.rules().opacity.unwrap_or(1.).clamp(0., 1.);
 
-            // Interpolate towards alpha = 1. at fullscreen.
             let p = fullscreen_progress as f32;
-            alpha * (1. - p) + 1. * p
+            let mut alpha = opacity * (1. - p) + 1. * p;
+
+            if let Some(opacity_on_fullscreen) = self.window.rules().opacity_on_fullscreen {
+                if opacity_on_fullscreen {
+                    alpha = opacity;
+                }
+            }
+
+            alpha
         };
 
         // let blur_config = self.window.rules().blur.merge_with(self.options.layout.blur);

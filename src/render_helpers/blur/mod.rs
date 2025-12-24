@@ -539,7 +539,7 @@ pub(super) unsafe fn get_main_buffer_blur(
     }
 
     {
-        let mut passes = blur_config.passes.clamp(0, 8) as usize;
+        let passes = blur_config.passes.clamp(0, 8) as usize;
 
         // let half_pixel = [
         //     0.5 / (tex_size.w as f32 / 2.0),

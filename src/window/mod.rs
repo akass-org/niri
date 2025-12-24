@@ -101,6 +101,9 @@ pub struct ResolvedWindowRules {
     /// Extra opacity to draw this window with.
     pub opacity: Option<f32>,
 
+    /// Opacity on fullscreen.
+    pub opacity_on_fullscreen: Option<bool>,
+
     /// Corner radius to assume this window has.
     pub geometry_corner_radius: Option<CornerRadius>,
 
@@ -284,6 +287,9 @@ impl ResolvedWindowRules {
                 }
                 if let Some(x) = rule.opacity {
                     resolved.opacity = Some(x);
+                }
+                if let Some(x) = rule.opacity_on_fullscreen {
+                    resolved.opacity_on_fullscreen = Some(x);
                 }
                 if let Some(x) = rule.geometry_corner_radius {
                     resolved.geometry_corner_radius = Some(x);
