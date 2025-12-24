@@ -13,7 +13,7 @@ layout {
     default-column-display "tabbed"
     
     background-color "#003300"
-    // background-in-working-area-only
+    fullscreen-backdrop-color "#000000FF"
 
     preset-column-widths {
         proportion 0.33333
@@ -493,7 +493,7 @@ layout {
 
 ### `insert-hint`
 
-<sup>Since: 0.1.10</sup> 
+<sup>Since: 0.1.10</sup>
 
 Settings for the window insert position hint during an interactive window move.
 
@@ -590,5 +590,20 @@ layer-rule {
     match namespace="^wallpaper$"
 
     place-within-backdrop true
+}
+
+### `fullscreen-backdrop-color`
+
+<sup>Since: 25.12</sup>
+
+Set the default backdrop color that niri draws behind fullscreen windows.
+
+> [!TIP]
+> This can be set to `"transparent"`, or just a transparent color, to enable transparency for
+> fullscreen windows.
+
+```kdl
+layout {
+    fullscreen-backdrop-color "#000000FF"
 }
 ```

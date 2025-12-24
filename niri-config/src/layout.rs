@@ -2,7 +2,8 @@ use knuffel::errors::DecodeError;
 use niri_ipc::{ColumnDisplay, SizeChange};
 
 use crate::appearance::{
-    Blur, Border, FocusRing, InsertHint, Shadow, TabIndicator, DEFAULT_BACKGROUND_COLOR,
+    Blur, Border, FocusRing, InsertHint, Shadow, TabIndicator, DEFAULT_BACKDROP_COLOR,
+    DEFAULT_BACKGROUND_COLOR,
 };
 use crate::utils::{expect_only_children, Flag, MergeWith};
 use crate::{ BlurRule, BorderRule, Color, FloatOrInt, InsertHintPart, ShadowRule, TabIndicatorPart};
@@ -26,6 +27,7 @@ pub struct Layout {
     pub background_color: Color,
     pub blur: Blur,
     pub background_in_working_area_only: bool,
+    pub fullscreen_backdrop_color: Color,
 }
 
 impl Default for Layout {
@@ -56,6 +58,7 @@ impl Default for Layout {
             background_color: DEFAULT_BACKGROUND_COLOR,
             blur: Default::default(),
             background_in_working_area_only: false,
+            fullscreen_backdrop_color: DEFAULT_BACKDROP_COLOR,
         }
     }
 }
@@ -84,6 +87,7 @@ impl MergeWith<LayoutPart> for Layout {
             default_column_display,
             struts,
             background_color,
+            fullscreen_backdrop_color,
         );
 
         if let Some(x) = part.default_column_width {
@@ -134,7 +138,10 @@ pub struct LayoutPart {
     pub background_color: Option<Color>,
     #[knuffel(child)]
     pub blur: Option<BlurRule>,
+    #[knuffel(child)]
     pub background_in_working_area_only: Option<Flag>,
+    #[knuffel(child)]
+    pub fullscreen_backdrop_color: Option<Color>,
 }
 
 #[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq)]
