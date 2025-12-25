@@ -17,7 +17,8 @@ use crate::render_helpers::blur::EffectsFramebuffers;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::shadow::ShadowRenderElement;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
-use crate::render_helpers::{render_to_texture, RenderTarget, SplitElements};
+use crate::render_helpers::surface::push_elements_from_surface_tree;
+use crate::render_helpers::{render_to_texture, RenderTarget};
 use crate::utils::{baba_is_float_offset, round_logical_in_physical};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::gles::GlesRenderer;
@@ -183,14 +184,14 @@ impl MappedLayer {
         Point::from((0., y))
     }
 
-    pub fn render<R: NiriRenderer>(
+    pub fn render_normal<R: NiriRenderer>(
         &self,
         renderer: &mut R,
         location: Point<f64, Logical>,
         target: RenderTarget,
         fx_buffers: Option<EffectsFramebufffersUserData>,
-    ) -> SplitElements<LayerSurfaceRenderElement<R>> {
-        let mut rv = SplitElements::default();
+        push: &mut dyn FnMut(LayerSurfaceRenderElement<R>),
+    ) {
         let mut gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> = None;
 
         let scale = Scale::from(self.scale);
@@ -209,34 +210,21 @@ impl MappedLayer {
                     alpha,
                     Kind::Unspecified,
                 );
-                rv.normal.push(elem.into());
+                push(elem.into());
             }
         } else {
             // Layer surfaces don't have extra geometry like windows.
             let buf_pos = location;
 
             let surface = self.surface.wl_surface();
-            for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
-                // Layer surfaces don't have extra geometry like windows.
-                let offset = popup_offset - popup.geometry().loc;
-
-                rv.popups.extend(render_elements_from_surface_tree(
-                    renderer,
-                    popup.wl_surface(),
-                    (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
-                    scale,
-                    alpha,
-                    Kind::ScanoutCandidate,
-                ));
-            }
-
-            rv.normal = render_elements_from_surface_tree(
+            push_elements_from_surface_tree(
                 renderer,
                 surface,
                 buf_pos.to_physical_precise_round(scale),
                 scale,
                 alpha,
                 Kind::ScanoutCandidate,
+                &mut |elem| push(elem.into()),
             );
 
             gles_elems = Some(render_elements_from_surface_tree(
@@ -249,38 +237,35 @@ impl MappedLayer {
             ));
         }
 
-        // let ignore_alpha = self.rules.blur.ignore_alpha.unwrap_or_default().0;
-        let blur_elem = (self.blur_config.on
-            && matches!(self.surface.layer(), Layer::Top | Layer::Overlay))
-        .then(|| {
-            let fx_buffers_rc = fx_buffers?;
-            let fx_buffers = fx_buffers_rc.borrow();
+        if self.blur_config.on && matches!(self.surface.layer(), Layer::Top | Layer::Overlay) {
+            if let Some(fx_buffers) = fx_buffers {
+                let fx_buffers_rc = fx_buffers;
+                let fx_buffers = fx_buffers_rc.borrow();
 
-            // debug!("render layer blur {:?}", self.rules.blur);
-            // TODO: respect sync point?
-            let alpha_tex = gles_elems
-                .and_then(|gles_elems| {
-                    let transform = fx_buffers.transform();
+                // debug!("render layer blur {:?}", self.rules.blur);
+                // TODO: respect sync point?
+                let alpha_tex = gles_elems
+                    .and_then(|gles_elems| {
+                        let transform = fx_buffers.transform();
 
-                    render_to_texture(
-                        renderer.as_gles_renderer(),
-                        transform.transform_size(fx_buffers.output_size()),
-                        self.scale.into(),
-                        Transform::Normal,
-                        Fourcc::Abgr8888,
-                        gles_elems.into_iter(),
-                    )
-                    .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
-                    .ok()
-                })
-                .map(|r| r.0);
+                        render_to_texture(
+                            renderer.as_gles_renderer(),
+                            transform.transform_size(fx_buffers.output_size()),
+                            self.scale.into(),
+                            Transform::Normal,
+                            Fourcc::Abgr8888,
+                            gles_elems.into_iter(),
+                        )
+                        .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
+                        .ok()
+                    })
+                    .map(|r| r.0);
 
-            // let radius = self.rules.geometry_corner_radius.unwrap_or_default();
+                // let radius = self.rules.geometry_corner_radius.unwrap_or_default();
 
-            let blur_sample_area = Rectangle::new(location, self.size).to_i32_round();
+                let blur_sample_area = Rectangle::new(location, self.size).to_i32_round();
 
-            Some(
-                BlurRenderElement::new(
+                let blur_elem = BlurRenderElement::new(
                     renderer,
                     fx_buffers_rc.clone(),
                     blur_sample_area,
@@ -295,18 +280,111 @@ impl MappedLayer {
                     1.,
                     alpha_tex,
                 )
-                .into(),
-            )
-        })
-        .flatten()
-        .into_iter();
+                .into();
+
+                push(blur_elem);
+            }
+        }
 
         let location = location.to_physical_precise_round(scale).to_logical(scale);
-        rv.normal
-            .extend(self.shadow.render(renderer, location).map(Into::into));
+        self.shadow
+            .render(renderer, location, &mut |elem| push(elem.into()));
+    }
 
-        rv.normal.extend(blur_elem);
+    pub fn render_popups<R: NiriRenderer>(
+        &self,
+        renderer: &mut R,
+        location: Point<f64, Logical>,
+        target: RenderTarget,
+        fx_buffers: Option<EffectsFramebufffersUserData>,
+        push: &mut dyn FnMut(LayerSurfaceRenderElement<R>),
+    ) {
+        let scale = Scale::from(self.scale);
+        let alpha = self.rules.opacity.unwrap_or(1.).clamp(0., 1.);
+        let location = location + self.bob_offset();
 
-        rv
+        if target.should_block_out(self.rules.block_out_from) {
+            return;
+        }
+
+        // Layer surfaces don't have extra geometry like windows.
+        let buf_pos = location;
+
+        let surface = self.surface.wl_surface();
+        for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
+            // Layer surfaces don't have extra geometry like windows.
+            let offset = popup_offset - popup.geometry().loc;
+
+            let size = popup.geometry().size.to_f64();
+
+            let mut gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> = None;
+
+            {
+                push_elements_from_surface_tree(
+                    renderer,
+                    popup.wl_surface(),
+                    (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
+                    scale,
+                    alpha,
+                    Kind::ScanoutCandidate,
+                    &mut |elem| push(elem.into()),
+                );
+            }
+
+            gles_elems = Some(render_elements_from_surface_tree(
+                renderer.as_gles_renderer(),
+                popup.wl_surface(),
+                (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
+                scale,
+                alpha,
+                Kind::ScanoutCandidate,
+            ));
+
+            if self.blur_config.on {
+                if let Some(fx_buffers_rc) = fx_buffers.as_ref() {
+                    let fx_buffers = fx_buffers_rc.borrow();
+                    let alpha_tex = gles_elems
+                        .and_then(|gles_elems| {
+                            let transform = fx_buffers.transform();
+
+                            render_to_texture(
+                                renderer.as_gles_renderer(),
+                                transform.transform_size(fx_buffers.output_size()),
+                                scale,
+                                Transform::Normal,
+                                Fourcc::Abgr8888,
+                                gles_elems.into_iter(),
+                            )
+                            .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
+                            .ok()
+                        })
+                        .map(|r| r.0);
+
+                    // let radius = self.rules.geometry_corner_radius.unwrap_or_default();
+
+                    let blur_sample_area =
+                        Rectangle::new(buf_pos + offset.to_f64(), size).to_i32_round();
+
+                    let blur_elem = BlurRenderElement::new(
+                        renderer,
+                        fx_buffers_rc.clone(),
+                        blur_sample_area,
+                        (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
+                        self.rules
+                            .geometry_corner_radius
+                            .unwrap_or_default()
+                            .top_left,
+                        false,
+                        scale.x,
+                        self.blur_config,
+                        1.,
+                        alpha_tex,
+                    )
+                    .into();
+
+                    push(blur_elem);
+                }
+            }
+        }
     }
 }

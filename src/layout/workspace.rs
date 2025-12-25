@@ -41,6 +41,8 @@ use crate::utils::{
     ResizeEdge,
 };
 use crate::window::ResolvedWindowRules;
+use std::cell::RefCell;
+type EffectsFramebufffersUserData = Rc<RefCell<EffectsFramebuffers>>;
 
 #[derive(Debug)]
 pub struct Workspace<W: LayoutElement> {
@@ -1647,53 +1649,61 @@ impl<W: LayoutElement> Workspace<W> {
         }
     }
 
-    pub fn render_elements<R: NiriRenderer>(
+    pub fn render_scrolling<R: NiriRenderer>(
         &self,
         renderer: &mut R,
         target: RenderTarget,
         focus_ring: bool,
         overview_zoom: f64,
-    ) -> (
-        impl Iterator<Item = WorkspaceRenderElement<R>>,
-        impl Iterator<Item = WorkspaceRenderElement<R>>,
+        push: &mut dyn FnMut(WorkspaceRenderElement<R>),
     ) {
         let fx_buffers = self
             .current_output()
             .and_then(EffectsFramebuffers::get_user_data);
 
         let scrolling_focus_ring = focus_ring && !self.floating_is_active();
-        let scrolling = self.scrolling.render_elements(
+        self.scrolling.render(
             renderer,
             target,
             scrolling_focus_ring,
             fx_buffers.clone(),
             overview_zoom,
+            &mut |elem| push(elem.into()),
         );
-        let scrolling = scrolling.into_iter().map(WorkspaceRenderElement::from);
+    }
 
+    pub fn render_floating<R: NiriRenderer>(
+        &self,
+        renderer: &mut R,
+        target: RenderTarget,
+        focus_ring: bool,
+        fx_buffers: Option<EffectsFramebufffersUserData>,
+        overview_zoom: f64,
+        push: &mut dyn FnMut(WorkspaceRenderElement<R>),
+    ) {
+        if !self.is_floating_visible() {
+            return;
+        }
+
+        let view_rect = Rectangle::from_size(self.view_size);
         let floating_focus_ring = focus_ring && self.floating_is_active();
-        let floating = self.is_floating_visible().then(|| {
-            let view_rect = Rectangle::from_size(self.view_size);
-            let floating = self.floating.render_elements(
-                renderer,
-                view_rect,
-                target,
-                floating_focus_ring,
-                fx_buffers.clone(),
-                overview_zoom,
-            );
-            floating.into_iter().map(WorkspaceRenderElement::from)
-        });
-        let floating = floating.into_iter().flatten();
-
-        (floating, scrolling)
+        self.floating.render(
+            renderer,
+            view_rect,
+            target,
+            floating_focus_ring,
+            fx_buffers.clone(),
+            overview_zoom,
+            &mut |elem| push(elem.into()),
+        );
     }
 
     pub fn render_shadow<R: NiriRenderer>(
         &self,
         renderer: &mut R,
-    ) -> impl Iterator<Item = ShadowRenderElement> + '_ {
-        self.shadow.render(renderer, Point::from((0., 0.)))
+        push: &mut dyn FnMut(ShadowRenderElement),
+    ) {
+        self.shadow.render(renderer, Point::from((0., 0.)), push);
     }
 
     pub fn render_background(&self) -> SolidColorRenderElement {
