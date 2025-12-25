@@ -1652,7 +1652,7 @@ impl<W: LayoutElement> Monitor<W> {
         };
 
         self.insert_hint_element
-            .render(renderer, render_loc.location, &mut |elem| {
+            .render(renderer, render_loc.location, &mut |elem: super::focus_ring::FocusRingRenderElement| {
                 let elem = MonitorInnerRenderElement::UncroppedInsertHint(elem);
                 let elem = RescaleRenderElement::from_element(elem, Point::default(), 1.);
                 let elem =

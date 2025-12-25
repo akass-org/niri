@@ -401,7 +401,7 @@ impl RenderElement<GlesRenderer> for BlurRenderElement {
                 damage,
                 opaque_regions,
                 self.alpha(),
-                false,
+                true,
                 alpha_tex.as_ref(),
             ),
         }

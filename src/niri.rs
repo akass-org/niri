@@ -13,7 +13,7 @@ use std::{env, mem, thread};
 use _server_decoration::server::org_kde_kwin_server_decoration_manager::Mode as KdeDecorationsMode;
 use anyhow::{bail, ensure, Context};
 use calloop::futures::Scheduler;
-use niri_config::debug::{self, PreviewRender};
+use niri_config::debug::PreviewRender;
 use niri_config::{
     Config, FloatOrInt, Key, Modifiers, OutputName, TrackLayout, WarpMouseToFocusMode,
     WorkspaceReference, Xkb,
@@ -22,9 +22,9 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::input::Keycode;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
-use smithay::backend::renderer::element::surface::{
-    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
-};
+use smithay::backend::renderer::element::surface::
+    WaylandSurfaceRenderElement
+;
 use smithay::backend::renderer::element::utils::{
     select_dmabuf_feedback, CropRenderElement, Relocate, RelocateRenderElement,
     RescaleRenderElement,
@@ -182,7 +182,6 @@ use crate::utils::{
 };
 use crate::window::mapped::MappedId;
 use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped, WindowRef};
-use smithay::wayland::seat::WaylandFocus;
 use std::hash::Hash;
 
 const CLEAR_COLOR_LOCKED: [f32; 4] = [0.3, 0.1, 0.1, 1.];
@@ -4005,20 +4004,26 @@ impl Niri {
 
         let output_scale = Scale::from(output.current_scale().fractional_scale());
 
-        let mut pointer_elements = match render_cursor {
-            RenderCursor::Hidden => vec![],
+        let mut pointer_elements = vec![];
+
+        // let mut pointer_elements =
+        let mut push = |elem| pointer_elements.push(elem);
+
+        match render_cursor {
+            RenderCursor::Hidden => {},
             RenderCursor::Surface { surface, hotspot } => {
                 let pointer_pos =
                     (pointer_pos - hotspot.to_f64()).to_physical_precise_round(output_scale);
 
-                render_elements_from_surface_tree(
+                push_elements_from_surface_tree(
                     renderer,
                     &surface,
                     pointer_pos,
                     output_scale,
                     1.,
                     Kind::Cursor,
-                )
+                    &mut |elem| push(elem.into()),
+                );
             }
             RenderCursor::Named {
                 icon,
@@ -4050,22 +4055,22 @@ impl Niri {
                 if let Some(element) = pointer_element {
                     pointer_elements.push(OutputRenderElements::NamedPointer(element));
                 }
-
-                pointer_elements
             }
         };
 
         if let Some(dnd_icon) = self.dnd_icon.as_ref() {
             let pointer_pos =
                 (pointer_pos + dnd_icon.offset.to_f64()).to_physical_precise_round(output_scale);
-            pointer_elements.extend(render_elements_from_surface_tree(
+
+            push_elements_from_surface_tree(
                 renderer,
                 &dnd_icon.surface,
                 pointer_pos,
                 output_scale,
                 1.,
                 Kind::ScanoutCandidate,
-            ));
+                &mut |elem| push(elem.into()),
+            );
         }
 
         pointer_elements
@@ -4668,20 +4673,20 @@ impl Niri {
         //
         // We must do it now before we actually render the previous render elements into the final
         // composited blur buffer
-        let mut fx_buffers = EffectsFramebuffers::get(output);
-        let blur_config = self.config.borrow().layout.blur;
+        // let mut fx_buffers = EffectsFramebuffers::get(output);
+        // let blur_config = self.config.borrow().layout.blur;
 
-        if blur_config.on && blur_config.passes > 0 {
-            if let Err(err) = fx_buffers.update_optimized_blur_buffer(
-                renderer.as_gles_renderer(),
-                layer_map,
-                output,
-                output_scale,
-                blur_config,
-            ) {
-                error!(?err, "Failed to update optimized blur buffer");
-            }
-        }
+        // if blur_config.on && blur_config.passes > 0 {
+        //     if let Err(err) = fx_buffers.update_optimized_blur_buffer(
+        //         renderer.as_gles_renderer(),
+        //         layer_map,
+        //         output,
+        //         output_scale,
+        //         blur_config,
+        //     ) {
+        //         error!(?err, "Failed to update optimized blur buffer");
+        //     }
+        // }
 
         elements
     }
@@ -6091,13 +6096,14 @@ impl Niri {
             };
         // FIXME: pointer.
         let mut elements = Vec::new();
+        let fx_buffers = EffectsFramebuffers::get_user_data(output);
         mapped.render(
             renderer,
             mapped.window.geometry().loc.to_f64(),
             scale,
             alpha,
             RenderTarget::ScreenCapture,
-            None, //TODO check if need fx_buffer
+            fx_buffers, //TODO check if need fx_buffer
             &mut |elem| elements.push(elem),
         );
         let geo = encompassing_geo(scale, elements.iter());
