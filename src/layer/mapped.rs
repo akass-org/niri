@@ -235,54 +235,54 @@ impl MappedLayer {
                 alpha,
                 Kind::ScanoutCandidate,
             ));
-        }
 
-        if self.blur_config.on && matches!(self.surface.layer(), Layer::Top | Layer::Overlay) {
-            if let Some(fx_buffers) = fx_buffers {
-                let fx_buffers_rc = fx_buffers;
-                let fx_buffers = fx_buffers_rc.borrow();
-
-                // debug!("render layer blur {:?}", self.rules.blur);
-                // TODO: respect sync point?
-                let alpha_tex = gles_elems
-                    .and_then(|gles_elems| {
-                        let transform = fx_buffers.transform();
-
-                        render_to_texture(
-                            renderer.as_gles_renderer(),
-                            transform.transform_size(fx_buffers.output_size()),
-                            self.scale.into(),
-                            Transform::Normal,
-                            Fourcc::Abgr8888,
-                            gles_elems.into_iter(),
-                        )
-                        .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
-                        .ok()
-                    })
-                    .map(|r| r.0);
-
-                // let radius = self.rules.geometry_corner_radius.unwrap_or_default();
-
-                let blur_sample_area = Rectangle::new(location, self.size).to_i32_round();
-
-                let blur_elem = BlurRenderElement::new(
-                    renderer,
-                    fx_buffers_rc.clone(),
-                    blur_sample_area,
-                    location.to_physical_precise_round(self.scale),
-                    self.rules
-                        .geometry_corner_radius
-                        .unwrap_or_default()
-                        .top_left,
-                    false,
-                    self.scale,
-                    self.blur_config,
-                    1.,
-                    alpha_tex,
-                )
-                .into();
-
-                push(blur_elem);
+            if self.blur_config.on && matches!(self.surface.layer(), Layer::Top | Layer::Overlay) {
+                if let Some(fx_buffers) = fx_buffers {
+                    let fx_buffers_rc = fx_buffers;
+                    let fx_buffers = fx_buffers_rc.borrow();
+    
+                    // debug!("render layer blur {:?}", self.rules.blur);
+                    // TODO: respect sync point?
+                    let alpha_tex = gles_elems
+                        .and_then(|gles_elems| {
+                            let transform = fx_buffers.transform();
+    
+                            render_to_texture(
+                                renderer.as_gles_renderer(),
+                                transform.transform_size(fx_buffers.output_size()),
+                                self.scale.into(),
+                                Transform::Normal,
+                                Fourcc::Abgr8888,
+                                gles_elems.into_iter(),
+                            )
+                            .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
+                            .ok()
+                        })
+                        .map(|r| r.0);
+    
+                    // let radius = self.rules.geometry_corner_radius.unwrap_or_default();
+    
+                    let blur_sample_area = Rectangle::new(location, self.size).to_i32_round();
+    
+                    let blur_elem = BlurRenderElement::new(
+                        renderer,
+                        fx_buffers_rc.clone(),
+                        blur_sample_area,
+                        location.to_physical_precise_round(self.scale),
+                        self.rules
+                            .geometry_corner_radius
+                            .unwrap_or_default()
+                            .top_left,
+                        false,
+                        self.scale,
+                        self.blur_config,
+                        1.,
+                        alpha_tex,
+                    )
+                    .into();
+    
+                    push(blur_elem);
+                }
             }
         }
 
