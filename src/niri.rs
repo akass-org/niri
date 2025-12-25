@@ -22,9 +22,7 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::input::Keycode;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
-use smithay::backend::renderer::element::surface::
-    WaylandSurfaceRenderElement
-;
+use smithay::backend::renderer::element::surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree};
 use smithay::backend::renderer::element::utils::{
     select_dmabuf_feedback, CropRenderElement, Relocate, RelocateRenderElement,
     RescaleRenderElement,
@@ -4004,26 +4002,20 @@ impl Niri {
 
         let output_scale = Scale::from(output.current_scale().fractional_scale());
 
-        let mut pointer_elements = vec![];
-
-        // let mut pointer_elements =
-        let mut push = |elem| pointer_elements.push(elem);
-
-        match render_cursor {
-            RenderCursor::Hidden => {},
+        let mut pointer_elements = match render_cursor {
+            RenderCursor::Hidden => vec![],
             RenderCursor::Surface { surface, hotspot } => {
                 let pointer_pos =
                     (pointer_pos - hotspot.to_f64()).to_physical_precise_round(output_scale);
 
-                push_elements_from_surface_tree(
+                render_elements_from_surface_tree(
                     renderer,
                     &surface,
                     pointer_pos,
                     output_scale,
                     1.,
                     Kind::Cursor,
-                    &mut |elem| push(elem.into()),
-                );
+                )
             }
             RenderCursor::Named {
                 icon,
@@ -4055,22 +4047,22 @@ impl Niri {
                 if let Some(element) = pointer_element {
                     pointer_elements.push(OutputRenderElements::NamedPointer(element));
                 }
+
+                pointer_elements
             }
         };
 
         if let Some(dnd_icon) = self.dnd_icon.as_ref() {
             let pointer_pos =
                 (pointer_pos + dnd_icon.offset.to_f64()).to_physical_precise_round(output_scale);
-
-            push_elements_from_surface_tree(
+            pointer_elements.extend(render_elements_from_surface_tree(
                 renderer,
                 &dnd_icon.surface,
                 pointer_pos,
                 output_scale,
                 1.,
                 Kind::ScanoutCandidate,
-                &mut |elem| push(elem.into()),
-            );
+            ));
         }
 
         pointer_elements
