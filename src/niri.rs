@@ -425,7 +425,7 @@ pub struct Niri {
     #[cfg(feature = "xdp-gnome-screencast")]
     pub dynamic_cast_id_for_portal: MappedId,
 
-    force_render_state: RefCell<HashMap<u32, ForceRenderState>>,
+    pub force_render_state: RefCell<HashMap<u32, ForceRenderState>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -580,15 +580,17 @@ struct SurfaceFrameThrottlingState {
 }
 
 struct ForceRenderState {
-    last_time: Duration,
-    is_delay: bool,
+    // To calculate time diff between current frame_callback_time and last render time.
+    last_render_time: Duration,
+    // To check if a force render frame is waiting to be rendered.
+    is_waiting_for_render: bool,
 }
 
 impl Default for ForceRenderState {
     fn default() -> Self {
         Self {
-            last_time: Duration::ZERO,
-            is_delay: false,
+            last_render_time: Duration::ZERO,
+            is_waiting_for_render: false,
         }
     }
 }
@@ -5147,8 +5149,8 @@ impl Niri {
             .entry(surface.id().protocol_id())
             .or_default();
 
-        force_render_state.last_time = frame_callback_time;
-        force_render_state.is_delay = false;
+        force_render_state.last_render_time = frame_callback_time;
+        force_render_state.is_waiting_for_render = false;
 
         send_frames_surface_tree(
             &surface,
@@ -5205,8 +5207,13 @@ impl Niri {
         for mapped in self.layout.windows_for_output_mut(output) {
             // debug!("send_frame");
             if mapped.rules().force_render == Some(true) || mapped.is_window_cast_target() {
+                // Calculate delay time
                 let interval = if let Some(force_render_fps) = mapped.rules().force_render_fps {
-                    Duration::from_secs_f64(1.0 / force_render_fps as f64)
+                    if force_render_fps == 0 {
+                        Duration::ZERO
+                    } else {
+                        Duration::from_secs_f64(1.0 / force_render_fps as f64)
+                    }
                 } else {
                     Duration::ZERO
                 };
@@ -5226,10 +5233,10 @@ impl Niri {
                             .entry(surface.id().protocol_id())
                             .or_default();
 
-                        if !force_render_state.is_delay {
+                        if !force_render_state.is_waiting_for_render {
                             // 上一帧到现在的时间差
                             let time_diff: Duration =
-                                frame_callback_time.saturating_sub(force_render_state.last_time);
+                                frame_callback_time.saturating_sub(force_render_state.last_render_time);
 
                             // 计算还需要等待多久（纳秒精度）
                             let remaining = interval.saturating_sub(time_diff);
@@ -5237,7 +5244,7 @@ impl Niri {
                             delayed
                                 .entry(surface.id())
                                 .or_insert((surface.clone(), remaining));
-                            force_render_state.is_delay = true;
+                            force_render_state.is_waiting_for_render = true;
                         }
                         return None;
                     } else {
