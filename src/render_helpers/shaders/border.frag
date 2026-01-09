@@ -7,10 +7,9 @@ uniform float niri_tint;
 uniform float niri_alpha;
 uniform float niri_scale;
 
-uniform vec2 niri_size;
 varying vec2 niri_v_coords;
 
-uniform float colorspace;
+uniform float colorspace;        // 0 srgb, 1 linear, 2 oklab, 3 oklch
 uniform float hue_interpolation;
 uniform vec4 color_from;
 uniform vec4 color_to;
@@ -23,237 +22,161 @@ uniform vec2 geo_size;
 uniform vec4 outer_radius;
 uniform float border_width;
 
-vec4 premul_rect(vec4 color) {
-    color.rgb *= color.a;
-    return color;
+/* ================= constants ================= */
+
+const mat3 RGB_TO_LMS = mat3(
+    0.4122214708, 0.5363325363, 0.0514459929,
+    0.2119034982, 0.6806995451, 0.1073969566,
+    0.0883024619, 0.2817188376, 0.6299787005
+);
+
+const mat3 LMS_TO_OKLAB = mat3(
+    0.2104542553, 0.7936177850, -0.0040720468,
+    1.9779984951, -2.4285922050, 0.4505937099,
+    0.0259040371, 0.7827717662, -0.8086757660
+);
+
+const mat3 OKLAB_TO_LMS = mat3(
+    1.0, 0.3963377774, 0.2158037573,
+    1.0, -0.1055613458, -0.0638541728,
+    1.0, -0.0894841775, -1.2914855480
+);
+
+const mat3 LMS_TO_RGB = mat3(
+    4.0767416621, -3.3077115913, 0.2309699292,
+   -1.2684380046,  2.6097574011, -0.3413193965,
+   -0.0041960863, -0.7034186147,  1.7076147010
+);
+
+/* ================= utils ================= */
+
+vec4 premul_rect(vec4 c) { c.rgb *= c.a; return c; }
+vec4 unpremul_rect(vec4 c) { c.rgb /= max(c.a, 1e-6); return c; }
+
+vec4 premul_lch(vec4 c) { c.xy *= c.a; return c; }
+vec4 unpremul_lch(vec4 c) { c.xy /= max(c.a, 1e-6); return c; }
+
+/* fast enough for UI */
+vec3 srgb_to_linear(vec3 c) { return c * c; }
+vec3 linear_to_srgb(vec3 c) { return sqrt(c); }
+
+/* ================= OKLab ================= */
+
+vec3 linear_to_oklab(vec3 c) {
+    vec3 lms = pow(c * RGB_TO_LMS, vec3(1.0 / 3.0));
+    return lms * LMS_TO_OKLAB;
 }
 
-vec4 premul_lch(vec4 color) {
-    color.xy *= color.a;
-    return color;
+vec3 oklab_to_linear(vec3 c) {
+    vec3 lms = pow(c * OKLAB_TO_LMS, vec3(3.0));
+    return lms * LMS_TO_RGB;
 }
 
-vec4 unpremul_rect(vec4 color) {
-    if (color.a == 0.0)
-        return color;
-
-    color.rgb /= color.a;
-    return color;
+vec3 lab_to_lch(vec3 c) {
+    float C = length(c.yz);
+    float H = mod(degrees(atan(c.z, c.y)) + 360.0, 360.0);
+    return vec3(c.x, C, H);
 }
 
-vec4 unpremul_lch(vec4 color) {
-    if (color.a == 0.0)
-        return color;
-
-    color.xy /= color.a;
-    return color;
-}
-
-vec4 premul_mix_unpremul_rect(vec4 color1, vec4 color2, float ratio) {
-    vec4 mixed = mix(premul_rect(color1), premul_rect(color2), ratio);
-    return unpremul_rect(mixed);
-}
-
-vec4 premul_mix_unpremul_lch(vec4 color1, vec4 color2, float ratio) {
-    vec4 mixed = mix(premul_lch(color1), premul_lch(color2), ratio);
-    return unpremul_lch(mixed);
-}
-
-vec3 srgb_to_linear(vec3 color) {
-    return pow(color, vec3(2.2));
-}
-
-vec3 linear_to_srgb(vec3 color) {
-    return pow(color, vec3(1.0 / 2.2));
-}
-
-vec3 lab_to_lch(vec3 color) {
-    float c = sqrt(pow(color.y, 2.0) + pow(color.z, 2.0));
-    float h = degrees(atan(color.z, color.y)) ;
-    h += h <= 0.0 ?
-        360.0 :
-        0.0 ;
+vec3 lch_to_lab(vec3 c) {
     return vec3(
-        color.x,
-        c,
-        h
+        c.x,
+        c.y * cos(radians(c.z)),
+        c.y * sin(radians(c.z))
     );
 }
 
-vec3 lch_to_lab(vec3 color) {
-    float a = color.y * clamp(cos(radians(color.z)), -1.0, 1.0);
-    float b = color.y * clamp(sin(radians(color.z)), -1.0, 1.0);
-    return vec3(
-        color.x,
-        a,
-        b
+/* ================= color mix (optimized, no branch) ================= */
+
+vec4 color_mix(vec4 a, vec4 b, float t) {
+    vec4 srgb = mix(premul_rect(a), premul_rect(b), t);
+
+    vec4 la = vec4(srgb_to_linear(a.rgb), a.a);
+    vec4 lb = vec4(srgb_to_linear(b.rgb), b.a);
+    vec4 linear = unpremul_rect(mix(premul_rect(la), premul_rect(lb), t));
+    linear.rgb = linear_to_srgb(linear.rgb);
+
+    vec4 oa = vec4(linear_to_oklab(la.rgb), a.a);
+    vec4 ob = vec4(linear_to_oklab(lb.rgb), b.a);
+    vec4 oklab = unpremul_rect(mix(premul_rect(oa), premul_rect(ob), t));
+    oklab.rgb = linear_to_srgb(oklab_to_linear(oklab.xyz));
+
+    vec3 lch1 = lab_to_lch(linear_to_oklab(la.rgb));
+    vec3 lch2 = lab_to_lch(linear_to_oklab(lb.rgb));
+
+    float dh = mod(lch2.z - lch1.z + 360.0, 360.0);
+    float h = lch1.z + mix(dh - 360.0, dh, step(dh, 180.0)) * t;
+
+    vec4 oklch = vec4(
+        linear_to_srgb(oklab_to_linear(lch_to_lab(
+            vec3(mix(lch1.x, lch2.x, t),
+                 mix(lch1.y, lch2.y, t),
+                 mod(h, 360.0))
+        ))),
+        mix(a.a, b.a, t)
     );
+
+    float m0 = step(abs(colorspace - 0.0), 0.5);
+    float m1 = step(abs(colorspace - 1.0), 0.5);
+    float m2 = step(abs(colorspace - 2.0), 0.5);
+    float m3 = step(abs(colorspace - 3.0), 0.5);
+
+    return srgb * m0 + linear * m1 + oklab * m2 + oklch * m3;
 }
 
-vec3 linear_to_oklab(vec3 color){
-    mat3 rgb_to_lms = mat3(
-        vec3(0.4122214708, 0.5363325363, 0.0514459929),
-        vec3(0.2119034982, 0.6806995451, 0.1073969566),
-        vec3(0.0883024619, 0.2817188376, 0.6299787005)
-    );
-    mat3 lms_to_oklab = mat3(
-        vec3(0.2104542553, 0.7936177850, -0.0040720468),
-        vec3(1.9779984951, -2.4285922050, 0.4505937099),
-        vec3(0.0259040371, 0.7827717662, -0.8086757660)
-    );
-    vec3 lms = color * rgb_to_lms;
-    lms = pow(lms, vec3(1.0 / 3.0));
-    return lms * lms_to_oklab;
+/* ================= gradient ================= */
+
+vec4 gradient_color(vec2 p) {
+    p += grad_offset;
+
+    float flip = step(grad_vec.x * grad_vec.y, 0.0);
+    p.x -= grad_width * flip;
+
+    float f = dot(p, grad_vec) / dot(grad_vec, grad_vec);
+    f += step(grad_vec.y, 0.0);
+    f = clamp(f, 0.0, 1.0);
+
+    return color_mix(color_from, color_to, f);
 }
 
-vec3 oklab_to_linear(vec3 color){
-    mat3 oklab_to_lms = mat3(
-        vec3(1.0, 0.3963377774, 0.2158037573),
-        vec3(1.0, -0.1055613458, -0.0638541728),
-        vec3(1.0, -0.0894841775, -1.2914855480)
-    );
-    mat3 lms_to_rgb = mat3(
-        vec3(4.0767416621, -3.3077115913, 0.2309699292),
-        vec3(-1.2684380046, 2.6097574011, -0.3413193965),
-        vec3(-0.0041960863, -0.7034186147, 1.7076147010)
-    );
-    vec3 lms = color * oklab_to_lms;
-    lms = pow(lms, vec3(3.0));
-    return lms * lms_to_rgb;
+/* ================= rounded rect SDF ================= */
+
+float rounding_alpha(vec2 p, vec2 s, vec4 r) {
+    float aa = 0.5 / niri_scale;
+
+    vec2 q = abs(p - s * 0.5) - s * 0.5;
+
+    float rx = mix(r.x, r.y, step(0.0, q.x));
+    float ry = mix(r.w, r.z, step(0.0, q.x));
+    float rad = mix(rx, ry, step(0.0, q.y));
+
+    float d = length(max(q + rad, 0.0)) - rad;
+    return 1.0 - smoothstep(-aa, aa, d);
 }
 
-vec4 color_mix(vec4 color1, vec4 color2, float color_ratio) {
-    vec4 color_out;
-
-    // srgb
-    if (colorspace == 0.0) {
-        return mix(premul_rect(color1), premul_rect(color2), color_ratio);
-    }
-
-    color1.rgb = srgb_to_linear(color1.rgb);
-    color2.rgb = srgb_to_linear(color2.rgb);
-
-    // srgb-linear
-    if (colorspace == 1.0) {
-        color_out = premul_mix_unpremul_rect(color1, color2, color_ratio);
-    // oklab
-    } else if (colorspace == 2.0) {
-        color1.xyz = linear_to_oklab(color1.rgb);
-        color2.xyz = linear_to_oklab(color2.rgb);
-        color_out = premul_mix_unpremul_rect(color1, color2, color_ratio);
-        color_out.rgb = oklab_to_linear(color_out.xyz);
-    // oklch
-    } else if (colorspace == 3.0) {
-        color1.xyz = lab_to_lch(linear_to_oklab(color1.rgb));
-        color2.xyz = lab_to_lch(linear_to_oklab(color2.rgb));
-        color_out = premul_mix_unpremul_lch(color1, color2, color_ratio);
-
-        float min_hue = min(color1.z, color2.z);
-        float max_hue = max(color1.z, color2.z);
-        float path_direct_distance = (max_hue - min_hue) * color_ratio;
-        float path_mod_distance = (360.0 - max_hue + min_hue) * color_ratio;
-
-        float path_mod =
-            color1.z == min_hue ?
-                mod(color1.z - path_mod_distance, 360.0) :
-                mod(color1.z + path_mod_distance, 360.0) ;
-        float path_direct =
-            color1.z == min_hue ?
-                color1.z + path_direct_distance :
-                color1.z - path_direct_distance ;
-
-        // shorter
-        if (hue_interpolation == 0.0) {
-            color_out.z =
-                max_hue - min_hue > 360.0 - max_hue + min_hue ?
-                    path_mod :
-                    path_direct ;
-        // longer
-        } else if (hue_interpolation == 1.0) {
-            color_out.z =
-                max_hue - min_hue <= 360.0 - max_hue + min_hue ?
-                    path_mod :
-                    path_direct ;
-        // increasing
-        } else if (hue_interpolation == 2.0) {
-            color_out.z =
-                color1.z > color2.z ?
-                    path_mod :
-                    path_direct ;
-        // decreasing
-        } else if (hue_interpolation == 3.0) {
-            color_out.z =
-                color1.z <= color2.z ?
-                    path_mod :
-                    path_direct ;
-        }
-        color_out.rgb = clamp(oklab_to_linear(lch_to_lab(color_out.xyz)), 0.0, 1.0);
-    }
-
-    return premul_rect(vec4(linear_to_srgb(color_out.rgb), color_out.a));
-}
-
-vec4 gradient_color(vec2 coords) {
-    coords = coords + grad_offset;
-
-    if ((grad_vec.x < 0.0 && 0.0 <= grad_vec.y) || (0.0 <= grad_vec.x && grad_vec.y < 0.0))
-        coords.x -= grad_width;
-
-    float frac = dot(coords, grad_vec) / dot(grad_vec, grad_vec);
-
-    if (grad_vec.y < 0.0)
-        frac += 1.0;
-
-    frac = clamp(frac, 0.0, 1.0);
-    return color_mix(color_from, color_to, frac);
-}
-
-float rounding_alpha(vec2 coords, vec2 size, vec4 corner_radius) {
-    vec2 center;
-    float radius;
-
-    if (coords.x < corner_radius.x && coords.y < corner_radius.x) {
-        radius = corner_radius.x;
-        center = vec2(radius, radius);
-    } else if (size.x - corner_radius.y < coords.x && coords.y < corner_radius.y) {
-        radius = corner_radius.y;
-        center = vec2(size.x - radius, radius);
-    } else if (size.x - corner_radius.z < coords.x && size.y - corner_radius.z < coords.y) {
-        radius = corner_radius.z;
-        center = vec2(size.x - radius, size.y - radius);
-    } else if (coords.x < corner_radius.w && size.y - corner_radius.w < coords.y) {
-        radius = corner_radius.w;
-        center = vec2(radius, size.y - radius);
-    } else {
-        return 1.0;
-    }
-
-    float dist = distance(coords, center);
-    float half_px = 0.5 / niri_scale;
-    return 1.0 - smoothstep(radius - half_px, radius + half_px, dist);
-}
+/* ================= main ================= */
 
 void main() {
-    vec3 coords_geo = input_to_geo * vec3(niri_v_coords, 1.0);
-    vec4 color = gradient_color(coords_geo.xy);
-    color = color * rounding_alpha(coords_geo.xy, geo_size, outer_radius);
+    vec2 p = (input_to_geo * vec3(niri_v_coords, 1.0)).xy;
 
-    if (border_width > 0.0) {
-        coords_geo -= vec3(border_width);
-        vec2 inner_geo_size = geo_size - vec2(border_width * 2.0);
-        if (0.0 <= coords_geo.x && coords_geo.x <= inner_geo_size.x
-                && 0.0 <= coords_geo.y && coords_geo.y <= inner_geo_size.y)
-        {
-            vec4 inner_radius = max(outer_radius - vec4(border_width), 0.0);
-            color = color * (1.0 - rounding_alpha(coords_geo.xy, inner_geo_size, inner_radius));
-        }
-    }
+    vec4 color = gradient_color(p);
 
-    color = color * niri_alpha;
+    float outer = rounding_alpha(p, geo_size, outer_radius);
+
+    vec2 ip = p - vec2(border_width);
+    vec2 is = geo_size - vec2(border_width * 2.0);
+    vec4 ir = max(outer_radius - vec4(border_width), 0.0);
+
+    float inner = rounding_alpha(ip, is, ir);
+
+    float has_border = step(0.0001, border_width);
+    float mask = outer * (1.0 - has_border * inner);
+
+    color *= mask * niri_alpha;
 
 #if defined(DEBUG_FLAGS)
-    if (niri_tint == 1.0)
-        color = vec4(0.0, 0.2, 0.0, 0.2) + color * 0.8;
+    float dbg = step(0.5, niri_tint);
+    color = mix(color, vec4(0.0, 0.2, 0.0, 0.2) + color * 0.8, dbg);
 #endif
 
     gl_FragColor = color;

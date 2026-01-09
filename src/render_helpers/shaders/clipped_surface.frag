@@ -7,6 +7,7 @@
 #endif
 
 precision highp float;
+
 #if defined(EXTERNAL)
 uniform samplerExternalOES tex;
 #else
@@ -26,54 +27,51 @@ uniform vec2 geo_size;
 uniform vec4 corner_radius;
 uniform mat3 input_to_geo;
 
-float rounding_alpha(vec2 coords, vec2 size) {
-    vec2 center;
-    float radius;
+/* ================= SDF rounded rect ================= */
 
-    if (coords.x < corner_radius.x && coords.y < corner_radius.x) {
-        radius = corner_radius.x;
-        center = vec2(radius, radius);
-    } else if (size.x - corner_radius.y < coords.x && coords.y < corner_radius.y) {
-        radius = corner_radius.y;
-        center = vec2(size.x - radius, radius);
-    } else if (size.x - corner_radius.z < coords.x && size.y - corner_radius.z < coords.y) {
-        radius = corner_radius.z;
-        center = vec2(size.x - radius, size.y - radius);
-    } else if (coords.x < corner_radius.w && size.y - corner_radius.w < coords.y) {
-        radius = corner_radius.w;
-        center = vec2(radius, size.y - radius);
-    } else {
-        return 1.0;
-    }
+float rounding_alpha(vec2 p, vec2 size) {
+    float aa = 0.5 / niri_scale;
 
-    float dist = distance(coords, center);
-    float half_px = 0.5 / niri_scale;
-    return 1.0 - smoothstep(radius - half_px, radius + half_px, dist);
+    // center-based SDF (IQ style, asymmetric radius)
+    vec2 q = abs(p - size * 0.5) - size * 0.5;
+
+    float rx = mix(corner_radius.x, corner_radius.y, step(0.0, q.x));
+    float ry = mix(corner_radius.w, corner_radius.z, step(0.0, q.x));
+    float r  = mix(rx, ry, step(0.0, q.y));
+
+    float d = length(max(q + r, 0.0)) - r;
+    return 1.0 - smoothstep(-aa, aa, d);
 }
 
 void main() {
-    vec3 coords_geo = input_to_geo * vec3(v_coords, 1.0);
+    vec2 geo = (input_to_geo * vec3(v_coords, 1.0)).xy;
 
-    // Sample the texture.
+    // texture sample
     vec4 color = texture2D(tex, v_coords);
+
 #if defined(NO_ALPHA)
-    color = vec4(color.rgb, 1.0);
+    color.a = 1.0;
 #endif
 
-    if (coords_geo.x < 0.0 || 1.0 < coords_geo.x || coords_geo.y < 0.0 || 1.0 < coords_geo.y) {
-        // Clip outside geometry.
-        color = vec4(0.0);
-    } else {
-        // Apply corner rounding inside geometry.
-        color = color * rounding_alpha(coords_geo.xy * geo_size, geo_size);
-    }
+    // clip mask (0 outside, 1 inside)
+    float inside =
+        step(0.0, geo.x) *
+        step(0.0, geo.y) *
+        step(geo.x, 1.0) *
+        step(geo.y, 1.0);
 
-    // Apply final alpha and tint.
-    color = color * alpha;
+    // rounded rect alpha
+    float round =
+        rounding_alpha(geo * geo_size, geo_size);
+
+    color *= inside * round;
+
+    // global alpha
+    color *= alpha;
 
 #if defined(DEBUG_FLAGS)
-    if (tint == 1.0)
-        color = vec4(0.0, 0.2, 0.0, 0.2) + color * 0.8;
+    float dbg = step(0.5, tint);
+    color = mix(color, vec4(0.0, 0.2, 0.0, 0.2) + color * 0.8, dbg);
 #endif
 
     gl_FragColor = color;

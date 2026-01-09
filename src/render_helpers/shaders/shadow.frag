@@ -21,121 +21,89 @@ uniform mat3 window_input_to_geo;
 uniform vec2 window_geo_size;
 uniform vec4 window_corner_radius;
 
-// Based on: https://madebyevan.com/shaders/fast-rounded-rectangle-shadows/
-//
-// License: CC0 (http://creativecommons.org/publicdomain/zero/1.0/)
+/* ================= math ================= */
 
-// A standard gaussian function, used for weighting samples
-float gaussian(float x, float sigma) {
-  const float pi = 3.141592653589793;
-  return exp(-(x * x) / (2.0 * sigma * sigma)) / (sqrt(2.0 * pi) * sigma);
+vec2 erf_approx(vec2 x) {
+    vec2 s = sign(x);
+    vec2 a = abs(x);
+    vec2 t = 1.0 + (0.278393 + (0.230389 + 0.078108 * (a * a)) * a) * a;
+    t *= t;
+    return s - s / (t * t);
 }
 
-// This approximates the error function, needed for the gaussian integral
-vec2 erf(vec2 x) {
-  vec2 s = sign(x), a = abs(x);
-  x = 1.0 + (0.278393 + (0.230389 + 0.078108 * (a * a)) * a) * a;
-  x *= x;
-  return s - s / (x * x);
+/* ================= rounded SDF ================= */
+
+float rounding_alpha(vec2 p, vec2 size, vec4 r) {
+    float aa = 0.5 / niri_scale;
+
+    vec2 q = abs(p - size * 0.5) - size * 0.5;
+
+    float rx = mix(r.x, r.y, step(0.0, q.x));
+    float ry = mix(r.w, r.z, step(0.0, q.x));
+    float cr = mix(rx, ry, step(0.0, q.y));
+
+    float d = length(max(q + cr, 0.0)) - cr;
+    return 1.0 - smoothstep(-aa, aa, d);
 }
 
-// Return the blurred mask along the x dimension
-float roundedBoxShadowX(float x, float y, float sigma, float corner, vec2 halfSize) {
-  float delta = min(halfSize.y - corner - abs(y), 0.0);
-  float curved = halfSize.x - corner + sqrt(max(0.0, corner * corner - delta * delta));
-  vec2 integral = 0.5 + 0.5 * erf((x + vec2(-curved, curved)) * (sqrt(0.5) / sigma));
-  return integral.y - integral.x;
-}
+/* ================= optimized shadow ================= */
 
-// Return the mask for the shadow of a box from lower to upper
-float roundedBoxShadow(vec2 lower, vec2 upper, vec2 point, float sigma, float corner) {
-  // Center everything to make the math easier
-  vec2 center = (lower + upper) * 0.5;
-  vec2 halfSize = (upper - lower) * 0.5;
-  point -= center;
+float roundedBoxShadowFast(vec2 size, vec2 p, float sigma, float corner) {
+    vec2 halfSize = size * 0.5;
+    p -= halfSize;
 
-  // The signal is only non-zero in a limited range, so don't waste samples
-  float low = point.y - halfSize.y;
-  float high = point.y + halfSize.y;
-  float start = clamp(-3.0 * sigma, low, high);
-  float end = clamp(3.0 * sigma, low, high);
+    float delta = min(halfSize.y - corner - abs(p.y), 0.0);
+    float curved = halfSize.x - corner + sqrt(max(0.0, corner * corner - delta * delta));
 
-  // Accumulate samples (we can get away with surprisingly few samples)
-  float step = (end - start) / 4.0;
-  float y = start + step * 0.5;
-  float value = 0.0;
-  for (int i = 0; i < 4; i++) {
-    value += roundedBoxShadowX(point.x, point.y - y, sigma, corner, halfSize) * gaussian(y, sigma) * step;
-    y += step;
-  }
+    float k = sqrt(0.5) / max(sigma, 1e-4);
+    vec2 integral = 0.5 + 0.5 * erf_approx((p.x + vec2(-curved, curved)) * k);
+    float xShadow = integral.y - integral.x;
 
-  return value;
-}
+    // 2-sample vertical integration
+    float y0 = -sigma;
+    float y1 =  sigma;
+    float g0 = exp(-0.5);
+    float g1 = g0;
 
-float rounding_alpha(vec2 coords, vec2 size, vec4 corner_radius) {
-    vec2 center;
-    float radius;
-
-    if (coords.x < corner_radius.x && coords.y < corner_radius.x) {
-        radius = corner_radius.x;
-        center = vec2(radius, radius);
-    } else if (size.x - corner_radius.y < coords.x && coords.y < corner_radius.y) {
-        radius = corner_radius.y;
-        center = vec2(size.x - radius, radius);
-    } else if (size.x - corner_radius.z < coords.x && size.y - corner_radius.z < coords.y) {
-        radius = corner_radius.z;
-        center = vec2(size.x - radius, size.y - radius);
-    } else if (coords.x < corner_radius.w && size.y - corner_radius.w < coords.y) {
-        radius = corner_radius.w;
-        center = vec2(radius, size.y - radius);
-    } else {
-        return 1.0;
-    }
-
-    float dist = distance(coords, center);
-    float half_px = 0.5 / niri_scale;
-    return 1.0 - smoothstep(radius - half_px, radius + half_px, dist);
+    return xShadow * (g0 + g1) * 0.5;
 }
 
 void main() {
-    vec3 coords_geo = input_to_geo * vec3(niri_v_coords, 1.0);
-    vec3 coords_window_geo = window_input_to_geo * vec3(niri_v_coords, 1.0);
+    vec2 geo = (input_to_geo * vec3(niri_v_coords, 1.0)).xy;
+    vec2 win = (window_input_to_geo * vec3(niri_v_coords, 1.0)).xy;
 
     vec4 color = shadow_color;
 
-    float shadow_value;
-    if (sigma < 0.1) {
-        // With low enough sigma just draw a rounded rectangle.
-        shadow_value = rounding_alpha(coords_geo.xy, geo_size, corner_radius);
-    } else {
-        shadow_value = roundedBoxShadow(
-            vec2(0.0, 0.0),
-            geo_size,
-            coords_geo.xy,
-            sigma,
-            // FIXME: figure out how to blur with different corner radii.
-            //
-            // GTK seems to call blurring separately for the rect and for the 4 corners:
-            // https://gitlab.gnome.org/GNOME/gtk/-/blob/gtk-4-16/gsk/gpu/shaders/gskgpuboxshadow.glsl
-            corner_radius.x
-        );
-    }
-    color = color * shadow_value;
+    // shadow vs solid rounded rect
+    float solid = rounding_alpha(geo, geo_size, corner_radius);
+    float blur  = roundedBoxShadowFast(geo_size, geo, sigma, corner_radius.x);
 
-    // Cut out the inside of the window geometry if requested.
-    if (window_geo_size != vec2(0.0, 0.0)) {
-        if (0.0 <= coords_window_geo.x && coords_window_geo.x <= window_geo_size.x
-                && 0.0 <= coords_window_geo.y && coords_window_geo.y <= window_geo_size.y) {
-            float alpha = rounding_alpha(coords_window_geo.xy, window_geo_size, window_corner_radius);
-            color = color * (1.0 - alpha);
-        }
-    }
+    float blur_mask = step(0.1, sigma);
+    float shadow = mix(solid, blur, blur_mask);
 
-    color = color * niri_alpha;
+    color *= shadow;
+
+    /* ===== window cutout ===== */
+
+    float win_inside =
+        step(0.0, win.x) *
+        step(0.0, win.y) *
+        step(win.x, window_geo_size.x) *
+        step(win.y, window_geo_size.y);
+
+    float win_round =
+        rounding_alpha(win, window_geo_size, window_corner_radius);
+
+    float cutout = win_inside * win_round;
+    color *= (1.0 - cutout);
+
+    /* ===== final alpha ===== */
+
+    color *= niri_alpha;
 
 #if defined(DEBUG_FLAGS)
-    if (niri_tint == 1.0)
-        color = vec4(0.0, 0.2, 0.0, 0.2) + color * 0.8;
+    float dbg = step(0.5, niri_tint);
+    color = mix(color, vec4(0.0, 0.2, 0.0, 0.2) + color * 0.8, dbg);
 #endif
 
     gl_FragColor = color;
