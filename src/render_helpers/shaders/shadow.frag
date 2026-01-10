@@ -7,7 +7,6 @@ uniform float niri_tint;
 uniform float niri_alpha;
 uniform float niri_scale;
 
-uniform vec2 niri_size;
 varying vec2 niri_v_coords;
 
 uniform vec4 shadow_color;
@@ -23,49 +22,43 @@ uniform vec4 window_corner_radius;
 
 /* ================= math ================= */
 
-vec2 erf_approx(vec2 x) {
-    vec2 s = sign(x);
-    vec2 a = abs(x);
-    vec2 t = 1.0 + (0.278393 + (0.230389 + 0.078108 * (a * a)) * a) * a;
+float erf_approx(float x) {
+    float s = sign(x);
+    x = abs(x);
+    float t = 1.0 + (0.278393 + (0.230389 + 0.078108 * x * x) * x) * x;
     t *= t;
     return s - s / (t * t);
 }
 
-/* ================= rounded SDF ================= */
+/* ================= SDF rounded rect ================= */
+
+float sdRoundRect(vec2 p, vec2 size, vec4 r) {
+    vec2 h = size * 0.5;
+    p -= h;
+
+    float rx = mix(r.x, r.y, step(0.0, p.x));
+    float ry = mix(r.w, r.z, step(0.0, p.x));
+    float cr = mix(rx, ry, step(0.0, p.y));
+
+    vec2 q = abs(p) - h + cr;
+    return length(max(q, 0.0)) - cr;
+}
+
+/* ================= coverage ================= */
 
 float rounding_alpha(vec2 p, vec2 size, vec4 r) {
     float aa = 0.5 / niri_scale;
-
-    vec2 q = abs(p - size * 0.5) - size * 0.5;
-
-    float rx = mix(r.x, r.y, step(0.0, q.x));
-    float ry = mix(r.w, r.z, step(0.0, q.x));
-    float cr = mix(rx, ry, step(0.0, q.y));
-
-    float d = length(max(q + cr, 0.0)) - cr;
+    float d = sdRoundRect(p, size, r);
     return 1.0 - smoothstep(-aa, aa, d);
 }
 
-/* ================= optimized shadow ================= */
+/* ================= shadow (CORRECT MODEL) ================= */
+/* coverage blur == Gaussian CDF */
 
-float roundedBoxShadowFast(vec2 size, vec2 p, float sigma, float corner) {
-    vec2 halfSize = size * 0.5;
-    p -= halfSize;
-
-    float delta = min(halfSize.y - corner - abs(p.y), 0.0);
-    float curved = halfSize.x - corner + sqrt(max(0.0, corner * corner - delta * delta));
-
-    float k = sqrt(0.5) / max(sigma, 1e-4);
-    vec2 integral = 0.5 + 0.5 * erf_approx((p.x + vec2(-curved, curved)) * k);
-    float xShadow = integral.y - integral.x;
-
-    // 2-sample vertical integration
-    float y0 = -sigma;
-    float y1 =  sigma;
-    float g0 = exp(-0.5);
-    float g1 = g0;
-
-    return xShadow * (g0 + g1) * 0.5;
+float shadow_alpha(vec2 p, vec2 size, vec4 r, float sigma) {
+    float d = sdRoundRect(p, size, r);
+    float s = max(sigma, 1e-4);
+    return 0.5 * (1.0 - erf_approx(d / (sqrt(2.0) * s)));
 }
 
 void main() {
@@ -74,16 +67,17 @@ void main() {
 
     vec4 color = shadow_color;
 
-    // shadow vs solid rounded rect
-    float solid = rounding_alpha(geo, geo_size, corner_radius);
-    float blur  = roundedBoxShadowFast(geo_size, geo, sigma, corner_radius.x);
+    /* ===== solid vs blur ===== */
 
-    float blur_mask = step(0.1, sigma);
-    float shadow = mix(solid, blur, blur_mask);
+    float solid = rounding_alpha(geo, geo_size, corner_radius);
+    float blur  = shadow_alpha(geo, geo_size, corner_radius, sigma);
+
+    float use_blur = step(0.1, sigma);
+    float shadow = mix(solid, blur, use_blur);
 
     color *= shadow;
 
-    /* ===== window cutout ===== */
+    /* ===== window cutout (coverage-correct) ===== */
 
     float win_inside =
         step(0.0, win.x) *
@@ -91,13 +85,11 @@ void main() {
         step(win.x, window_geo_size.x) *
         step(win.y, window_geo_size.y);
 
-    float win_round =
-        rounding_alpha(win, window_geo_size, window_corner_radius);
+    float win_cov = rounding_alpha(win, window_geo_size, window_corner_radius);
 
-    float cutout = win_inside * win_round;
-    color *= (1.0 - cutout);
+    color *= (1.0 - win_inside * win_cov);
 
-    /* ===== final alpha ===== */
+    /* ===== final ===== */
 
     color *= niri_alpha;
 
