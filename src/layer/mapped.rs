@@ -236,7 +236,7 @@ impl MappedLayer {
                 Kind::ScanoutCandidate,
             ));
 
-            if self.blur_config.on && matches!(self.surface.layer(), Layer::Top | Layer::Overlay) {
+            if self.blur_config.on /* && matches!(self.surface.layer(), Layer::Top | Layer::Overlay) */{
                 if let Some(fx_buffers) = fx_buffers {
                     let fx_buffers_rc = fx_buffers;
                     let fx_buffers = fx_buffers_rc.borrow();
