@@ -152,8 +152,8 @@ use crate::protocols::screencopy::{Screencopy, ScreencopyBuffer, ScreencopyManag
 use crate::protocols::virtual_pointer::VirtualPointerManagerState;
 use crate::pw_utils::{Cast, PipeWire};
 #[cfg(feature = "xdp-gnome-screencast")]
-use crate::pw_utils::{CastSizeChange, PwToNiri};
 use crate::render_helpers::blur::EffectsFramebuffers;
+use crate::pw_utils::{CastSizeChange, CursorData, PwToNiri};
 use crate::render_helpers::debug::draw_opaque_regions;
 use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use crate::render_helpers::renderer::NiriRenderer;
@@ -180,7 +180,7 @@ use crate::utils::{
     logical_output, make_screenshot_path, output_matches_name, output_size, panel_orientation,
     send_scale_transform, write_png_rgba8, xwayland,
 };
-use crate::window::mapped::MappedId;
+use crate::window::mapped::{MappedId, WindowCastRenderElements};
 use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped, WindowRef};
 use std::hash::Hash;
 
@@ -2050,64 +2050,109 @@ impl State {
         let _span = tracy_client::span!("State::redraw_cast");
 
         let casts = &mut self.niri.casts;
-        let Some(cast) = casts.iter_mut().find(|cast| cast.stream_id == stream_id) else {
+        let Some(idx) = casts.iter().position(|cast| cast.stream_id == stream_id) else {
             warn!("cast to redraw is missing");
             return;
         };
+        let cast = &mut casts[idx];
 
-        match &cast.target {
+        let id = match &cast.target {
             CastTarget::Nothing => {
                 self.backend.with_primary_renderer(|renderer| {
                     if cast.dequeue_buffer_and_clear(renderer) {
                         cast.last_frame_time = get_monotonic_time();
                     }
                 });
+                return;
             }
             CastTarget::Output(weak) => {
                 if let Some(output) = weak.upgrade() {
                     self.niri.queue_redraw(&output);
                 }
+                return;
             }
-            CastTarget::Window { id } => {
-                let mut windows = self.niri.layout.windows();
-                let Some((_, mapped)) = windows.find(|(_, mapped)| mapped.id().get() == *id) else {
-                    return;
-                };
+            CastTarget::Window { id } => *id,
+        };
 
-                // Use the cached output since it will be present even if the output was
-                // currently disconnected.
-                let Some(output) = self.niri.mapped_cast_output.get(&mapped.window).cloned() else {
-                    return;
-                };
+        // Lack of partial borrowing strikes again...
+        let mut casts = mem::take(&mut self.niri.casts);
+        let cast = &mut casts[idx];
+        let mut stop = false;
+        // Use a loop {} so we can break instead of early-return.
+        #[allow(clippy::never_loop)]
+        loop {
+            let mut windows = self.niri.layout.windows();
+            let Some((_, mapped)) = windows.find(|(_, mapped)| mapped.id().get() == id) else {
+                break;
+            };
 
-                let scale = Scale::from(output.current_scale().fractional_scale());
-                let bbox = mapped
-                    .window
-                    .bbox_with_popups()
-                    .to_physical_precise_up(scale);
+            // Use the cached output since it will be present even if the output was
+            // currently disconnected.
+            let Some(output) = self.niri.mapped_cast_output.get(&mapped.window) else {
+                break;
+            };
 
-                drop(windows);
+            let scale = Scale::from(output.current_scale().fractional_scale());
+            let bbox = mapped
+                .window
+                .bbox_with_popups()
+                .to_physical_precise_up(scale);
 
-                match cast.ensure_size(bbox.size) {
-                    Ok(CastSizeChange::Ready) | Ok(CastSizeChange::Pending) => (),
-                    Err(err) => {
-                        warn!("error updating stream size, stopping screencast: {err:?}");
-                        let session_id = cast.session_id;
-                        self.niri.stop_cast(session_id);
-                        return;
-                    }
+            match cast.ensure_size(bbox.size) {
+                Ok(CastSizeChange::Ready) => (),
+                Ok(CastSizeChange::Pending) => break,
+                Err(err) => {
+                    warn!("error updating stream size, stopping screencast: {err:?}");
+                    stop = true;
+                    break;
                 }
-
-                self.backend.with_primary_renderer(|renderer| {
-                    // FIXME: pointer.
-                    let mut elements = Vec::new();
-                    mapped.render_for_screen_cast(renderer, scale, &mut |elem| elements.push(elem));
-
-                    if cast.dequeue_buffer_and_render(renderer, &elements, bbox.size, scale) {
-                        cast.last_frame_time = get_monotonic_time();
-                    }
-                });
             }
+
+            self.backend.with_primary_renderer(|renderer| {
+                let mut elements = Vec::new();
+                mapped.render_for_screen_cast(renderer, scale, &mut |elem| {
+                    elements.push(CastRenderElement::from(elem))
+                });
+
+                let mut pointer_elements = Vec::new();
+                let mut pointer_location = Point::default();
+                if let Some((pointer_pos, win_pos)) = self.niri.pointer_pos_for_window_cast(mapped)
+                {
+                    // Pointer location must be relative to the screencast buffer.
+                    // - win_pos is the position of the main window surface in output-local
+                    //   coordinates
+                    // - bbox.loc moves us relative to the screencast buffer
+                    let buf_pos = win_pos + bbox.loc.to_f64().to_logical(scale);
+                    let output_pos = self.niri.global_space.output_geometry(output).unwrap().loc;
+                    pointer_location = pointer_pos - output_pos.to_f64() - buf_pos;
+
+                    let pos = buf_pos.to_physical_precise_round(scale).upscale(-1);
+                    self.niri.render_pointer(renderer, output, &mut |elem| {
+                        let elem =
+                            RelocateRenderElement::from_element(elem, pos, Relocate::Relative);
+                        pointer_elements.push(CastRenderElement::from(elem));
+                    });
+                }
+                let cursor_data = CursorData::compute(&pointer_elements, pointer_location, scale);
+
+                if cast.dequeue_buffer_and_render(
+                    renderer,
+                    &elements,
+                    &cursor_data,
+                    bbox.size,
+                    scale,
+                ) {
+                    cast.last_frame_time = get_monotonic_time();
+                }
+            });
+
+            break;
+        }
+        let session_id = cast.session_id;
+        self.niri.casts = casts;
+
+        if stop {
+            self.niri.stop_cast(session_id);
         }
     }
 
@@ -3971,95 +4016,64 @@ impl Niri {
         }
     }
 
-    pub fn pointer_element<R: NiriRenderer>(
+    /// Checks if the pointer should be included on a window cast or screenshot.
+    ///
+    /// Returns `(cursor_global_pos, win_pos)` if the pointer should be included, or `None`
+    /// otherwise.
+    pub fn pointer_pos_for_window_cast(
         &self,
-        renderer: &mut R,
-        output: &Output,
-    ) -> Vec<OutputRenderElements<R>> {
-        if !self.pointer_visibility.is_visible() {
-            return vec![];
-        }
-
-        let _span = tracy_client::span!("Niri::pointer_element");
-        let output_scale = output.current_scale();
-        let output_pos = self.global_space.output_geometry(output).unwrap().loc;
-
-        // Check whether we need to draw the tablet cursor or the regular cursor.
-        let pointer_pos = self
-            .tablet_cursor_location
-            .unwrap_or_else(|| self.seat.get_pointer().unwrap().current_location());
-        let pointer_pos = pointer_pos - output_pos.to_f64();
-
-        // Get the render cursor to draw.
-        let cursor_scale = output_scale.integer_scale();
-        let render_cursor = self.cursor_manager.get_render_cursor(cursor_scale);
-
-        let output_scale = Scale::from(output.current_scale().fractional_scale());
-
-        let mut pointer_elements = match render_cursor {
-            RenderCursor::Hidden => vec![],
-            RenderCursor::Surface { surface, hotspot } => {
-                let pointer_pos =
-                    (pointer_pos - hotspot.to_f64()).to_physical_precise_round(output_scale);
-
-                render_elements_from_surface_tree(
-                    renderer,
-                    &surface,
-                    pointer_pos,
-                    output_scale,
-                    1.,
-                    Kind::Cursor,
-                )
-            }
-            RenderCursor::Named {
-                icon,
-                scale,
-                cursor,
-            } => {
-                let (idx, frame) = cursor.frame(self.start_time.elapsed().as_millis() as u32);
-                let hotspot = XCursor::hotspot(frame).to_logical(scale);
-                let pointer_pos =
-                    (pointer_pos - hotspot.to_f64()).to_physical_precise_round(output_scale);
-
-                let texture = self.cursor_texture_cache.get(icon, scale, &cursor, idx);
-                let mut pointer_elements = vec![];
-                let pointer_element = match MemoryRenderBufferRenderElement::from_buffer(
-                    renderer,
-                    pointer_pos,
-                    &texture,
-                    None,
-                    None,
-                    None,
-                    Kind::Cursor,
-                ) {
-                    Ok(element) => Some(element),
-                    Err(err) => {
-                        warn!("error importing a cursor texture: {err:?}");
-                        None
-                    }
-                };
-                if let Some(element) = pointer_element {
-                    pointer_elements.push(OutputRenderElements::NamedPointer(element));
+        mapped: &Mapped,
+    ) -> Option<(Point<f64, Logical>, Point<f64, Logical>)> {
+        // Tablet cursor.
+        if let Some(tablet_pos) = self.tablet_cursor_location {
+            let contents = self.contents_under(tablet_pos);
+            if let Some((w, HitType::Input { win_pos })) = contents.window {
+                if w == mapped.window {
+                    // Tablet tools don't currently expose current focus, and don't currently
+                    // have grabs. When those are implemented, this branch should be adjusted
+                    // to look more similar to the branch below.
+                    return Some((tablet_pos, win_pos));
                 }
-
-                pointer_elements
             }
-        };
+        }
+        // Regular cursor.
+        else if let Some((w, HitType::Input { win_pos })) = &self.pointer_contents.window {
+            if w == &mapped.window {
+                // Grabs can modify the pointer focus, making it different from
+                // pointer_contents. Notably, gestures like Mod+MMB will remove the pointer
+                // focus, and ClickGrab will keep pointer focus on the clicked window even
+                // while it's moving over a different window.
+                //
+                // So, double-check that current_focus() (after grabs) also matches the pointer
+                // contents.
+                let pointer = self.seat.get_pointer().unwrap();
 
-        if let Some(dnd_icon) = self.dnd_icon.as_ref() {
-            let pointer_pos =
-                (pointer_pos + dnd_icon.offset.to_f64()).to_physical_precise_round(output_scale);
-            pointer_elements.extend(render_elements_from_surface_tree(
-                renderer,
-                &dnd_icon.surface,
-                pointer_pos,
-                output_scale,
-                1.,
-                Kind::ScanoutCandidate,
-            ));
+                // The DnD grab is a bit special because it has its own focus (data device)
+                // while the pointer focus is cleared. That focus is not currently exposed from
+                // Smithay, and showing DnD icons on window screenshots seems useful, so let's
+                // just allow it during DnD grabs.
+                let is_dnd_grab = pointer
+                    .with_grab(|_, grab| State::is_dnd_grab(grab.as_any()))
+                    .unwrap_or(false);
+
+                let current_focus_matches = is_dnd_grab
+                    || pointer
+                        .current_focus()
+                        .map(|focused| self.find_root_shell_surface(&focused))
+                        .is_some_and(|focused| mapped.is_wl_surface(&focused));
+                if current_focus_matches {
+                    // We don't check for pointer visibility because it can only be Visible or
+                    // Hidden, and never Disabled (then it wouldn't have focus). Even when the
+                    // pointer is Hidden, we want to render it, since the user explicitly
+                    // requested show_pointer = true, and otherwise there's no easy way to
+                    // screenshot a window with pointer with hide-when-typing because pressing
+                    // the screenshot bind will hide the pointer.
+                    return Some((pointer.current_location(), *win_pos));
+                }
+            }
         }
 
-        pointer_elements
+        None
     }
 
     pub fn refresh_pointer_outputs(&mut self) {
@@ -5460,7 +5474,10 @@ impl Niri {
 
         let scale = Scale::from(output.current_scale().fractional_scale());
 
-        let mut elements = None;
+        let mut elements = Vec::new();
+        let mut pointer = Vec::new();
+        let mut cursor_data = None;
+
         let mut casts_to_stop = vec![];
 
         let mut casts = mem::take(&mut self.casts);
@@ -5486,12 +5503,29 @@ impl Niri {
                 continue;
             }
 
-            // FIXME: Hidden / embedded / metadata cursor
-            let elements = elements.get_or_insert_with(|| {
-                self.render(renderer, output, true, RenderTarget::Screencast)
-            });
+            if cursor_data.is_none() {
+                // FIXME: support debug draw opaque regions.
+                self.render_inner(
+                    renderer,
+                    output,
+                    false,
+                    RenderTarget::Screencast,
+                    &mut |elem| elements.push(elem.into()),
+                );
 
-            if cast.dequeue_buffer_and_render(renderer, elements, size, scale) {
+                self.render_pointer(renderer, output, &mut |elem| pointer.push(elem.into()));
+
+                let output_pos = self.global_space.output_geometry(output).unwrap().loc;
+                let pointer_pos = self
+                    .tablet_cursor_location
+                    .unwrap_or_else(|| self.seat.get_pointer().unwrap().current_location());
+                let pointer_pos = pointer_pos - output_pos.to_f64();
+
+                cursor_data = Some(CursorData::compute(&pointer, pointer_pos, scale));
+            }
+            let cursor_data = cursor_data.as_ref().unwrap();
+
+            if cast.dequeue_buffer_and_render(renderer, &elements, cursor_data, size, scale) {
                 cast.last_frame_time = target_presentation_time;
             }
         }
@@ -5648,32 +5682,30 @@ impl Niri {
                 continue;
             }
 
-            // FIXME: pointer.
-            let window_pointer_location = self.get_window_pointer_location(mapped, output);
-
-            let pointer_elements = self.pointer_element(renderer, output);
-
-            let pointer_elements: Vec<WindowCastRenderElements<GlesRenderer>> =
-                window_pointer_location
-                    .and_then(|window_pointer_location| {
-                        self.get_window_pointer_element(
-                            scale,
-                            pointer_elements,
-                            window_pointer_location,
-                        )
-                    })
-                    .map(|e| e.0)
-                    .into_iter()
-                    .flatten()
-                    .map(|elem| WindowCastRenderElements::RelocatedPointer(elem))
-                    .collect();
-
             let mut elements = Vec::new();
-            elements.extend(pointer_elements);
+            mapped.render_for_screen_cast(renderer, scale, &mut |elem| {
+                elements.push(CastRenderElement::from(elem))
+            });
 
-            mapped.render_for_screen_cast(renderer, scale, &mut |elem| elements.push(elem));
+            let mut pointer_elements = Vec::new();
+            let mut pointer_location = Point::default();
+            if let Some((pointer_pos, win_pos)) = self.pointer_pos_for_window_cast(mapped) {
+                // Pointer location must be relative to the screencast buffer.
+                // - win_pos is the position of the main window surface in output-local coordinates
+                // - bbox.loc moves us relative to the screencast buffer
+                let buf_pos = win_pos + bbox.loc.to_f64().to_logical(scale);
+                let output_pos = self.global_space.output_geometry(output).unwrap().loc;
+                pointer_location = pointer_pos - output_pos.to_f64() - buf_pos;
 
-            if cast.dequeue_buffer_and_render(renderer, &elements, bbox.size, scale) {
+                let pos = buf_pos.to_physical_precise_round(scale).upscale(-1);
+                self.render_pointer(renderer, output, &mut |elem| {
+                    let elem = RelocateRenderElement::from_element(elem, pos, Relocate::Relative);
+                    pointer_elements.push(CastRenderElement::from(elem));
+                });
+            }
+            let cursor_data = CursorData::compute(&pointer_elements, pointer_location, scale);
+
+            if cast.dequeue_buffer_and_render(renderer, &elements, &cursor_data, bbox.size, scale) {
                 cast.last_frame_time = target_presentation_time;
             }
         }
@@ -6080,7 +6112,7 @@ impl Niri {
 
         // Add pointer if requested and it's over this window.
         if show_pointer {
-            let mut render = |win_pos: Point<f64, Logical>| {
+            if let Some((_, win_pos)) = self.pointer_pos_for_window_cast(mapped) {
                 // Pointer elements are at output-local physical coords.
                 // Relocate by -win_pos to make them window-relative.
                 let pos = win_pos.to_physical_precise_round(scale).upscale(-1);
@@ -6088,55 +6120,6 @@ impl Niri {
                     let elem = RelocateRenderElement::from_element(elem, pos, Relocate::Relative);
                     elements.push(elem.into());
                 });
-            };
-
-            // Tablet cursor.
-            if let Some(tablet_pos) = self.tablet_cursor_location {
-                let contents = self.contents_under(tablet_pos);
-                if let Some((w, HitType::Input { win_pos })) = contents.window {
-                    if w == mapped.window {
-                        // Tablet tools don't currently expose current focus, and don't currently
-                        // have grabs. When those are implemented, this branch should be adjusted
-                        // to look more similar to the branch below.
-                        render(win_pos);
-                    }
-                }
-            }
-            // Regular cursor.
-            else if let Some((w, HitType::Input { win_pos })) = &self.pointer_contents.window {
-                if w == &mapped.window {
-                    // Grabs can modify the pointer focus, making it different from
-                    // pointer_contents. Notably, gestures like Mod+MMB will remove the pointer
-                    // focus, and ClickGrab will keep pointer focus on the clicked window even
-                    // while it's moving over a different window.
-                    //
-                    // So, double-check that current_focus() (after grabs) also matches the pointer
-                    // contents.
-                    let pointer = self.seat.get_pointer().unwrap();
-
-                    // The DnD grab is a bit special because it has its own focus (data device)
-                    // while the pointer focus is cleared. That focus is not currently exposed from
-                    // Smithay, and showing DnD icons on window screenshots seems useful, so let's
-                    // just allow it during DnD grabs.
-                    let is_dnd_grab = pointer
-                        .with_grab(|_, grab| State::is_dnd_grab(grab.as_any()))
-                        .unwrap_or(false);
-
-                    let current_focus_matches = is_dnd_grab
-                        || pointer
-                            .current_focus()
-                            .map(|focused| self.find_root_shell_surface(&focused))
-                            .is_some_and(|focused| mapped.is_wl_surface(&focused));
-                    if current_focus_matches {
-                        // We don't check for pointer visibility because it can only be Visible or
-                        // Hidden, and never Disabled (then it wouldn't have focus). Even when the
-                        // pointer is Hidden, we want to render it, since the user explicitly
-                        // requested show_pointer = true, and otherwise there's no easy way to
-                        // screenshot a window with pointer with hide-when-typing because pressing
-                        // the screenshot bind will hide the pointer.
-                        render(*win_pos);
-                    }
-                }
             }
         }
         let pointer_count = elements.len();
@@ -7028,6 +7011,15 @@ niri_render_elements! {
     WindowScreenshotRenderElement<R> => {
         Layout = LayoutElementRenderElement<R>,
         Pointer = RelocateRenderElement<PointerRenderElements<R>>,
+    }
+}
+
+niri_render_elements! {
+    CastRenderElement<R> => {
+        Output = OutputRenderElements<R>,
+        Window = WindowCastRenderElements<R>,
+        Pointer = PointerRenderElements<R>,
+        RelocatedPointer = RelocateRenderElement<PointerRenderElements<R>>,
     }
 }
 
