@@ -55,9 +55,9 @@ layer-rule{
 }
 ```
 
-### 窗口捕获光标绘制
+### ~~窗口捕获光标绘制~~（上游已实现）
 
-窗口捕获时（应用不自行绘制光标的时候）可以绘制光标，不过目前无法通过 OBS 设置取消绘制。 参考 [Naxdy/niri@defae6a](https://github.com/Naxdy/niri/commit/defae6ad230e909657e3fcd5c46beeb926714652) 并修复 bug
+~~窗口捕获时（应用不自行绘制光标的时候）可以绘制光标，不过目前无法通过 OBS 设置取消绘制。 参考 [Naxdy/niri@defae6a](https://github.com/Naxdy/niri/commit/defae6ad230e909657e3fcd5c46beeb926714652) 并修复 bug~~
 
 ### shm 屏幕录制
 
