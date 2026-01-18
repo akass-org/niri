@@ -23,7 +23,9 @@ use crate::render_helpers::RenderTarget;
 use crate::utils::{get_monotonic_time, CastSessionId, CastStreamId};
 use crate::window::mapped::{MappedId, WindowCastRenderElements};
 
+#[cfg(feature = "xdp-gnome-screencast")]
 mod pw_utils;
+#[cfg(feature = "xdp-gnome-screencast")]
 use pw_utils::{Cast, CastSizeChange, CursorData, PipeWire, PwToNiri};
 
 pub struct Screencasting {
