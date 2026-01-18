@@ -20,7 +20,7 @@ use crate::dbus::mutter_screen_cast::{self, CursorMode, ScreenCastToNiri, Stream
 use crate::niri::{CastTarget, Niri, OutputRenderElements, PointerRenderElements, State};
 use crate::niri_render_elements;
 use crate::render_helpers::RenderTarget;
-use crate::utils::get_monotonic_time;
+use crate::utils::{get_monotonic_time, CastSessionId, CastStreamId};
 use crate::window::mapped::{MappedId, WindowCastRenderElements};
 
 mod pw_utils;
@@ -46,8 +46,8 @@ pub struct Screencasting {
 
 /// A screencast request that hasn't been started yet.
 pub struct PendingCast {
-    pub session_id: usize,
-    pub stream_id: usize,
+    pub session_id: CastSessionId,
+    pub stream_id: CastStreamId,
     pub cursor_mode: CursorMode,
     pub signal_ctx: SignalEmitter<'static>,
 }
@@ -137,7 +137,7 @@ impl State {
         }
     }
 
-    fn redraw_cast(&mut self, stream_id: usize) {
+    fn redraw_cast(&mut self, stream_id: CastStreamId) {
         let _span = tracy_client::span!("State::redraw_cast");
 
         let casts = &mut self.niri.casting.casts;
@@ -156,8 +156,8 @@ impl State {
                 });
                 return;
             }
-            CastTarget::Output(weak) => {
-                if let Some(output) = weak.upgrade() {
+            CastTarget::Output { output, .. } => {
+                if let Some(output) = output.upgrade() {
                     self.niri.queue_redraw(&output);
                 }
                 return;
@@ -260,7 +260,7 @@ impl State {
             // Leave refresh as is when clearing. Chances are, the next refresh will match it,
             // then we'll avoid reconfiguring.
             CastTarget::Nothing => (),
-            CastTarget::Output(output) => {
+            CastTarget::Output { output, .. } => {
                 if let Some(output) = output.upgrade() {
                     refresh = Some(output.current_mode().unwrap().refresh as u32);
                 }
@@ -316,8 +316,8 @@ impl State {
         // We don't stop dynamic casts on missing output/window.
         let (size, refresh) = match target {
             CastTarget::Nothing => panic!("dynamic cast starting target must not be Nothing"),
-            CastTarget::Output(weak) => {
-                let Some(output) = weak.upgrade() else {
+            CastTarget::Output { output, .. } => {
+                let Some(output) = output.upgrade() else {
                     return;
                 };
                 cast_params_for_output(&output)
@@ -391,8 +391,7 @@ impl State {
                 signal_ctx,
             } => {
                 let _span = tracy_client::span!("StartCast");
-
-                debug!(session_id, stream_id, "StartCast");
+                let _span = debug_span!("StartCast", %session_id, %stream_id).entered();
 
                 let (target, size, refresh, alpha) = match target {
                     StreamTargetId::Output { name } => {
@@ -405,15 +404,12 @@ impl State {
                         };
 
                         let (size, refresh) = cast_params_for_output(output);
-                        (CastTarget::Output(output.downgrade()), size, refresh, false)
+                        (CastTarget::output(output), size, refresh, false)
                     }
                     StreamTargetId::Window { id }
                         if id == self.niri.casting.dynamic_cast_id_for_portal.get() =>
                     {
-                        debug!(
-                            session_id,
-                            stream_id, "delaying dynamic cast until target is set"
-                        );
+                        debug!("delaying dynamic cast until target is set");
                         self.niri.casting.pending_dynamic_casts.push(PendingCast {
                             session_id,
                             stream_id,
@@ -542,8 +538,7 @@ impl Niri {
     ) {
         let _span = tracy_client::span!("Niri::render_for_screen_cast");
 
-        let target = CastTarget::Output(output.downgrade());
-
+        let weak = output.downgrade();
         let size = output.current_mode().unwrap().size;
         let transform = output.current_transform();
         let size = transform.transform_size(size);
@@ -562,7 +557,7 @@ impl Niri {
                 continue;
             }
 
-            if cast.target != target {
+            if !cast.target.matches_output(&weak) {
                 continue;
             }
 
@@ -589,15 +584,21 @@ impl Niri {
                     &mut |elem| elements.push(elem.into()),
                 );
 
+                let mut pointer_pos = Point::default();
                 if self.pointer_visibility.is_visible() {
-                    self.render_pointer(renderer, output, &mut |elem| pointer.push(elem.into()));
+                    let output_geo = self.global_space.output_geometry(output).unwrap().to_f64();
+                    let pointer_loc = self
+                        .tablet_cursor_location
+                        .unwrap_or_else(|| self.seat.get_pointer().unwrap().current_location());
+                    // Only render when the pointer is within the output. Otherwise, it will
+                    // happily appear anywhere outside the output video source in OBS.
+                    if output_geo.contains(pointer_loc) {
+                        pointer_pos = pointer_loc - output_geo.loc;
+                        self.render_pointer(renderer, output, &mut |elem| {
+                            pointer.push(elem.into())
+                        });
+                    }
                 }
-
-                let output_pos = self.global_space.output_geometry(output).unwrap().loc;
-                let pointer_pos = self
-                    .tablet_cursor_location
-                    .unwrap_or_else(|| self.seat.get_pointer().unwrap().current_location());
-                let pointer_pos = pointer_pos - output_pos.to_f64();
 
                 cursor_data = Some(CursorData::compute(&pointer, pointer_pos, scale));
             }
@@ -698,10 +699,9 @@ impl Niri {
         }
     }
 
-    fn stop_cast(&mut self, session_id: usize) {
+    pub fn stop_cast(&mut self, session_id: CastSessionId) {
         let _span = tracy_client::span!("Niri::stop_cast");
-
-        debug!(session_id, "StopCast");
+        let _span = debug_span!("stop_cast", %session_id).entered();
 
         self.casting
             .pending_dynamic_casts
@@ -721,7 +721,7 @@ impl Niri {
 
         let dbus = &self.dbus.as_ref().unwrap();
         let server = dbus.conn_screen_cast.as_ref().unwrap().object_server();
-        let path = format!("/org/gnome/Mutter/ScreenCast/Session/u{session_id}");
+        let path = format!("/org/gnome/Mutter/ScreenCast/Session/u{}", session_id.get());
         if let Ok(iface) = server.interface::<_, mutter_screen_cast::Session>(path) {
             let _span = tracy_client::span!("invoking Session::stop");
 

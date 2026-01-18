@@ -336,6 +336,11 @@ pub struct Niri {
     /// Most recent XKB settings from org.freedesktop.locale1.
     pub xkb_from_locale1: Option<Xkb>,
 
+    /// Whether to reset the keymap on the next physical keyboard event.
+    ///
+    /// Set to true when handling virtual keyboard events which override the keymap.
+    pub reset_keymap: bool,
+
     pub cursor_manager: CursorManager,
     pub cursor_texture_cache: CursorTextureCache,
     pub cursor_shape_manager_state: CursorShapeManagerState,
@@ -593,8 +598,48 @@ pub enum CenterCoords {
 pub enum CastTarget {
     // Dynamic cast before selecting anything.
     Nothing,
-    Output(WeakOutput),
-    Window { id: u64 },
+    Output {
+        output: WeakOutput,
+        /// Cached name of the output.
+        name: String,
+    },
+    Window {
+        id: u64,
+    },
+}
+
+impl CastTarget {
+    pub fn output(output: &Output) -> Self {
+        Self::Output {
+            output: output.downgrade(),
+            name: output.name(),
+        }
+    }
+
+    pub fn matches_output(&self, weak: &WeakOutput) -> bool {
+        matches!(self, CastTarget::Output { output, .. } if output == weak)
+    }
+
+    pub fn matches(&self, ipc: &niri_ipc::CastTarget) -> bool {
+        use CastTarget::*;
+        match (self, ipc) {
+            (Nothing, niri_ipc::CastTarget::Nothing {}) => true,
+            (Output { name, .. }, niri_ipc::CastTarget::Output { name: ipc_name }) => {
+                name == ipc_name
+            }
+            (Window { id }, niri_ipc::CastTarget::Window { id: ipc_id }) => id == ipc_id,
+            _ => false,
+        }
+    }
+
+    pub fn make_ipc(&self) -> niri_ipc::CastTarget {
+        use CastTarget::*;
+        match self {
+            Nothing => niri_ipc::CastTarget::Nothing {},
+            Output { name, .. } => niri_ipc::CastTarget::Output { name: name.clone() },
+            Window { id } => niri_ipc::CastTarget::Window { id: *id },
+        }
+    }
 }
 
 /// Pending update to a window's focus timestamp.
@@ -799,6 +844,7 @@ impl State {
         // screencasts.
         #[cfg(feature = "xdp-gnome-screencast")]
         self.niri.refresh_mapped_cast_window_rules();
+        self.ipc_refresh_casts();
 
         self.niri.refresh_window_rules();
         self.refresh_ipc_outputs();
@@ -1367,7 +1413,7 @@ impl State {
         }
     }
 
-    fn set_xkb_config(&mut self, xkb: XkbConfig) {
+    pub fn set_xkb_config(&mut self, xkb: XkbConfig) {
         let keyboard = self.niri.seat.get_keyboard().unwrap();
         let num_lock = keyboard.modifier_state().num_lock;
         if let Err(err) = keyboard.set_xkb_config(self, xkb) {
@@ -2493,6 +2539,7 @@ impl Niri {
             is_fdo_idle_inhibited: Arc::new(AtomicBool::new(false)),
             keyboard_shortcuts_inhibiting_surfaces: HashMap::new(),
             xkb_from_locale1: None,
+            reset_keymap: false,
             cursor_manager,
             cursor_texture_cache: Default::default(),
             cursor_shape_manager_state,
@@ -2826,9 +2873,8 @@ impl Niri {
             RedrawState::WaitingForEstimatedVBlankAndQueued(token) => self.event_loop.remove(token),
         }
 
-        self.stop_casts_for_target(CastTarget::Output(output.downgrade()));
-
-        self.remove_screencopy_output(output);
+        self.stop_casts_for_target(CastTarget::output(output));
+        self.screencopy_state.remove_output(output);
 
         // Disable the output global and remove some time later to give the clients some time to
         // process it.
@@ -5061,7 +5107,7 @@ impl Niri {
         let mut screencopy_state = mem::take(&mut self.screencopy_state);
         let elements = OnceCell::new();
 
-        for queue in screencopy_state.queues_mut() {
+        screencopy_state.with_queues_mut(|queue| {
             let (damage_tracker, screencopy) = queue.split();
             if let Some(screencopy) = screencopy {
                 if screencopy.output() == output {
@@ -5108,7 +5154,7 @@ impl Niri {
                     }
                 };
             }
-        }
+        });
 
         self.screencopy_state = screencopy_state;
     }
@@ -5135,10 +5181,10 @@ impl Niri {
             screencopy.overlay_cursor(),
             RenderTarget::ScreenCapture,
         );
-        let Some(queue) = self.screencopy_state.get_queue_mut(manager) else {
-            bail!("screencopy manager destroyed already");
+        let Some(damage_tracker) = self.screencopy_state.damage_tracker(manager) else {
+            error!("screencopy queue must not be deleted as long as frames exist");
+            bail!("screencopy queue missing");
         };
-        let damage_tracker = queue.split().0;
 
         let render_result = Self::render_for_screencopy_internal(
             renderer,
@@ -5226,12 +5272,8 @@ impl Niri {
     #[cfg(not(feature = "xdp-gnome-screencast"))]
     pub fn stop_casts_for_target(&mut self, _target: CastTarget) {}
 
-    pub fn remove_screencopy_output(&mut self, output: &Output) {
-        let _span = tracy_client::span!("Niri::remove_screencopy_output");
-        for queue in self.screencopy_state.queues_mut() {
-            queue.remove_output(output);
-        }
-    }
+    #[cfg(not(feature = "xdp-gnome-screencast"))]
+    pub fn stop_cast(&mut self, _session_id: crate::utils::CastSessionId) {}
 
     pub fn debug_toggle_damage(&mut self) {
         self.debug_draw_damage = !self.debug_draw_damage;
