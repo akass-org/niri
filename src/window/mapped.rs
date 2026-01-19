@@ -508,6 +508,7 @@ impl Mapped {
             .to_logical(scale);
         let radius = radius.fit_to(window_size.w as f32, window_size.h as f32);
         let location = self.window.geometry().loc.to_f64() - bbox.loc.to_logical(scale);
+        let exponent = rules.rounding_exponent.unwrap_or(2.8);
 
         let use_border = |elem| {
             if let LayoutElementRenderElement::SolidColor(elem) = &elem {
@@ -530,6 +531,7 @@ impl Mapped {
                         radius,
                         scale.x as f32,
                         1.,
+                        exponent,
                     )
                     .with_location(geo.loc)
                     .into();

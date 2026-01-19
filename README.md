@@ -87,13 +87,29 @@ window-rule {
 }
 ```
 
-####
+#### fullscreen-backdrop-color
 
 允许自定义全屏背景颜色 [YaLTeR#3004](https://github.com/YaLTeR/niri/pull/3004) 
 
 ```
 layout {
     fullscreen-backdrop-color "transparent"
+}
+```
+
+#### rounding-exponent
+
+窗口超椭圆圆角系数，默认 2.8，如果设置为 2.0 则为普通圆角
+
+```
+window-rule {
+    #match rule
+    rounding-exponent 2.8
+}
+
+layer-rule {
+    #match rule
+    rounding-exponent 2.8
 }
 ```
 

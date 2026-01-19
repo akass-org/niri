@@ -512,6 +512,7 @@ pub struct TabIndicator {
     pub active_gradient: Option<Gradient>,
     pub inactive_gradient: Option<Gradient>,
     pub urgent_gradient: Option<Gradient>,
+    pub exponent: f32,
 }
 
 impl Default for TabIndicator {
@@ -534,6 +535,7 @@ impl Default for TabIndicator {
             active_gradient: None,
             inactive_gradient: None,
             urgent_gradient: None,
+            exponent: 2.8,
         }
     }
 }

@@ -6,7 +6,9 @@ use crate::appearance::{
     DEFAULT_BACKGROUND_COLOR,
 };
 use crate::utils::{expect_only_children, Flag, MergeWith};
-use crate::{ BlurRule, BorderRule, Color, FloatOrInt, InsertHintPart, ShadowRule, TabIndicatorPart};
+use crate::{
+    BlurRule, BorderRule, Color, FloatOrInt, InsertHintPart, ShadowRule, TabIndicatorPart,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {

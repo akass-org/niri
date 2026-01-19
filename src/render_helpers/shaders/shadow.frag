@@ -19,6 +19,7 @@ uniform vec4 corner_radius;
 uniform mat3 window_input_to_geo;
 uniform vec2 window_geo_size;
 uniform vec4 window_corner_radius;
+uniform float exponent;
 
 /* ================= math ================= */
 
@@ -34,14 +35,30 @@ float erf_approx(float x) {
 
 float sdRoundRect(vec2 p, vec2 size, vec4 r) {
     vec2 h = size * 0.5;
-    p -= h;
+    vec2 offset = p - h;
 
-    float rx = mix(r.x, r.y, step(0.0, p.x));
-    float ry = mix(r.w, r.z, step(0.0, p.x));
-    float cr = mix(rx, ry, step(0.0, p.y));
+    // 四角半径选择（与你最早的版本完全一致）
+    float rx = mix(r.x, r.y, step(0.0, offset.x));
+    float ry = mix(r.w, r.z, step(0.0, offset.x));
+    float rad = mix(rx, ry, step(0.0, offset.y));
 
-    vec2 q = abs(p) - h + cr;
-    return length(max(q, 0.0)) - cr;
+    // 局部角坐标
+    vec2 q = abs(offset) - (h - rad);
+
+    // -------- 超椭圆（FG-squircle）--------
+    vec2 corner = max(q, 0.0);
+
+    float dist =
+        pow(
+            pow(corner.x, exponent) +
+            pow(corner.y, exponent),
+            1.0 / exponent
+        ) - rad;
+
+    // inside 修正（保持 signed distance 语义）
+    dist += min(max(q.x, q.y), 0.0);
+
+    return dist;
 }
 
 /* ================= coverage ================= */

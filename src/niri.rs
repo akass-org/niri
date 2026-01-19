@@ -22,7 +22,7 @@ use smithay::backend::allocator::Fourcc;
 use smithay::backend::input::Keycode;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
-use smithay::backend::renderer::element::surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree};
+use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::{
     select_dmabuf_feedback, CropRenderElement, Relocate, RelocateRenderElement,
     RescaleRenderElement,
@@ -4861,8 +4861,8 @@ impl Niri {
 
                         if !force_render_state.is_waiting_for_render {
                             // 上一帧到现在的时间差
-                            let time_diff: Duration =
-                                frame_callback_time.saturating_sub(force_render_state.last_render_time);
+                            let time_diff: Duration = frame_callback_time
+                                .saturating_sub(force_render_state.last_render_time);
 
                             // 计算还需要等待多久（纳秒精度）
                             let remaining = interval.saturating_sub(time_diff);

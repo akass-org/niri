@@ -20,6 +20,7 @@ pub struct ClippedSurfaceRenderElement<R: NiriRenderer> {
     corner_radius: CornerRadius,
     geometry: Rectangle<f64, Logical>,
     scale: f32,
+    exponent: f32,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -35,6 +36,7 @@ impl<R: NiriRenderer> ClippedSurfaceRenderElement<R> {
         geometry: Rectangle<f64, Logical>,
         program: GlesTexProgram,
         corner_radius: CornerRadius,
+        exponent: f32,
     ) -> Self {
         Self {
             inner: elem,
@@ -42,6 +44,7 @@ impl<R: NiriRenderer> ClippedSurfaceRenderElement<R> {
             corner_radius,
             geometry,
             scale: scale.x as f32,
+            exponent,
         }
     }
 
@@ -87,6 +90,7 @@ impl<R: NiriRenderer> ClippedSurfaceRenderElement<R> {
             Uniform::new("niri_scale", self.scale),
             Uniform::new("geo_size", geo_size),
             Uniform::new("corner_radius", <[f32; 4]>::from(self.corner_radius)),
+            Uniform::new("exponent", self.exponent),
             mat3_uniform("input_to_geo", input_to_geo),
         ]
     }

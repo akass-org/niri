@@ -376,6 +376,7 @@ impl Thumbnail {
             None
         }
         .unwrap_or_default();
+        let exponent = mapped.rules().rounding_exponent.unwrap_or(2.8);
 
         let has_border_shader = BorderRenderElement::has_shader(renderer);
         let clip_shader = ClippedSurfaceRenderElement::shader(renderer).cloned();
@@ -385,8 +386,14 @@ impl Thumbnail {
             LayoutElementRenderElement::Wayland(elem) => {
                 if let Some(shader) = clip_shader.clone() {
                     if ClippedSurfaceRenderElement::will_clip(&elem, s, geo, radius) {
-                        let elem =
-                            ClippedSurfaceRenderElement::new(elem, s, geo, shader.clone(), radius);
+                        let elem = ClippedSurfaceRenderElement::new(
+                            elem,
+                            s,
+                            geo,
+                            shader.clone(),
+                            radius,
+                            exponent,
+                        );
                         return ThumbnailRenderElement::ClippedSurface(elem);
                     }
                 }
@@ -415,6 +422,7 @@ impl Thumbnail {
                         radius,
                         scale as f32,
                         1.,
+                        exponent,
                     )
                     .into();
                 }
@@ -542,6 +550,7 @@ impl Thumbnail {
                 radius,
                 scale,
                 0.5,
+                exponent,
             );
             background.render(renderer, loc, &mut |elem| {
                 push(WindowMruUiRenderElement::FocusRing(elem))
@@ -563,6 +572,7 @@ impl Thumbnail {
                 radius.expanded_by(config.width as f32),
                 scale,
                 1.,
+                exponent,
             );
 
             border.render(renderer, loc, &mut |elem| {

@@ -43,6 +43,7 @@ struct Parameters {
     // Should only be used for visual improvements, i.e. corner radius anti-aliasing.
     scale: f32,
     alpha: f32,
+    exponent: f32,
 }
 
 impl BorderRenderElement {
@@ -59,6 +60,7 @@ impl BorderRenderElement {
         corner_radius: CornerRadius,
         scale: f32,
         alpha: f32,
+        exponent: f32,
     ) -> Self {
         let inner = ShaderRenderElement::empty(ProgramType::Border, Kind::Unspecified);
         let mut rv = Self {
@@ -75,6 +77,7 @@ impl BorderRenderElement {
                 corner_radius,
                 scale,
                 alpha,
+                exponent,
             },
         };
         rv.update_inner();
@@ -97,6 +100,7 @@ impl BorderRenderElement {
                 corner_radius: Default::default(),
                 scale: 1.,
                 alpha: 1.,
+                exponent: 2.8,
             },
         }
     }
@@ -119,6 +123,7 @@ impl BorderRenderElement {
         corner_radius: CornerRadius,
         scale: f32,
         alpha: f32,
+        exponent: f32,
     ) {
         let params = Parameters {
             size,
@@ -132,6 +137,7 @@ impl BorderRenderElement {
             corner_radius,
             scale,
             alpha,
+            exponent,
         };
         if self.params == params {
             return;
@@ -154,6 +160,7 @@ impl BorderRenderElement {
             corner_radius,
             scale,
             alpha,
+            exponent,
         } = self.params;
 
         let grad_offset = geometry.loc - gradient_area.loc;
@@ -212,6 +219,7 @@ impl BorderRenderElement {
                 Uniform::new("geo_size", geo_size.to_array()),
                 Uniform::new("outer_radius", <[f32; 4]>::from(corner_radius)),
                 Uniform::new("border_width", border_width),
+                Uniform::new("exponent", exponent),
             ]),
             HashMap::new(),
         );

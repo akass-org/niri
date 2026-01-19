@@ -21,6 +21,7 @@ use super::{compute_overview_zoom, ActivateWindow, HitType, LayoutElement, Optio
 use crate::animation::{Animation, Clock};
 use crate::input::swipe_tracker::SwipeTracker;
 use crate::niri_render_elements;
+use crate::render_helpers::blur::EffectsFramebuffers;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::shadow::ShadowRenderElement;
 use crate::render_helpers::solid_color::SolidColorRenderElement;
@@ -30,7 +31,6 @@ use crate::utils::transaction::Transaction;
 use crate::utils::{
     output_size, round_logical_in_physical, round_logical_in_physical_max1, ResizeEdge,
 };
-use crate::render_helpers::blur::EffectsFramebuffers;
 
 /// Amount of touchpad movement to scroll the height of one workspace.
 const WORKSPACE_GESTURE_MOVEMENT: f64 = 300.;
@@ -1651,14 +1651,17 @@ impl<W: LayoutElement> Monitor<W> {
             return;
         };
 
-        self.insert_hint_element
-            .render(renderer, render_loc.location, &mut |elem: super::focus_ring::FocusRingRenderElement| {
+        self.insert_hint_element.render(
+            renderer,
+            render_loc.location,
+            &mut |elem: super::focus_ring::FocusRingRenderElement| {
                 let elem = MonitorInnerRenderElement::UncroppedInsertHint(elem);
                 let elem = RescaleRenderElement::from_element(elem, Point::default(), 1.);
                 let elem =
                     RelocateRenderElement::from_element(elem, Point::default(), Relocate::Relative);
                 push(elem);
-            });
+            },
+        );
     }
 
     pub fn render_workspaces<R: NiriRenderer>(
@@ -1729,7 +1732,7 @@ impl<W: LayoutElement> Monitor<W> {
             }
 
             let fx_buffers = EffectsFramebuffers::get_user_data(&self.output);
-            ws.render_floating(renderer, target, focus_ring,fx_buffers,zoom, push!(),);
+            ws.render_floating(renderer, target, focus_ring, fx_buffers, zoom, push!());
 
             if let Some(loc) = insert_hint_render_loc {
                 if loc.workspace == InsertWorkspace::Existing(ws.id()) {
@@ -1738,7 +1741,7 @@ impl<W: LayoutElement> Monitor<W> {
                 }
             }
 
-            ws.render_scrolling(renderer, target, focus_ring,self.overview_zoom(), push!());
+            ws.render_scrolling(renderer, target, focus_ring, self.overview_zoom(), push!());
         }
     }
 

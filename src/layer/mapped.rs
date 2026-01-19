@@ -124,6 +124,7 @@ impl MappedLayer {
         self.block_out_buffer.resize(size);
 
         let radius = self.rules.geometry_corner_radius.unwrap_or_default();
+        let exponent = self.rules.exponent.unwrap_or(2.8);
         // FIXME: is_active based on keyboard focus?
         self.shadow.update_render_elements(
             Rectangle::new(Point::new(0., 0.), size),
@@ -131,6 +132,7 @@ impl MappedLayer {
             radius,
             self.scale,
             1.,
+            exponent,
         );
     }
 
@@ -236,17 +238,19 @@ impl MappedLayer {
                 Kind::ScanoutCandidate,
             ));
 
-            if self.blur_config.on /* && matches!(self.surface.layer(), Layer::Top | Layer::Overlay) */{
+            if self.blur_config.on
+            /* && matches!(self.surface.layer(), Layer::Top | Layer::Overlay) */
+            {
                 if let Some(fx_buffers) = fx_buffers {
                     let fx_buffers_rc = fx_buffers;
                     let fx_buffers = fx_buffers_rc.borrow();
-    
+
                     // debug!("render layer blur {:?}", self.rules.blur);
                     // TODO: respect sync point?
                     let alpha_tex = gles_elems
                         .and_then(|gles_elems| {
                             let transform = fx_buffers.transform();
-    
+
                             render_to_texture(
                                 renderer.as_gles_renderer(),
                                 transform.transform_size(fx_buffers.output_size()),
@@ -259,11 +263,11 @@ impl MappedLayer {
                             .ok()
                         })
                         .map(|r| r.0);
-    
+
                     // let radius = self.rules.geometry_corner_radius.unwrap_or_default();
-    
+
                     let blur_sample_area = Rectangle::new(location, self.size).to_i32_round();
-    
+
                     let blur_elem = BlurRenderElement::new(
                         renderer,
                         fx_buffers_rc.clone(),
@@ -280,7 +284,7 @@ impl MappedLayer {
                         alpha_tex,
                     )
                     .into();
-    
+
                     push(blur_elem);
                 }
             }

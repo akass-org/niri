@@ -35,6 +35,8 @@ struct Parameters {
 
     window_geometry: Rectangle<f64, Logical>,
     window_corner_radius: CornerRadius,
+
+    exponent: f32,
 }
 
 impl ShadowRenderElement {
@@ -49,6 +51,7 @@ impl ShadowRenderElement {
         window_geometry: Rectangle<f64, Logical>,
         window_corner_radius: CornerRadius,
         alpha: f32,
+        exponent: f32,
     ) -> Self {
         let inner = ShaderRenderElement::empty(ProgramType::Shadow, Kind::Unspecified);
         let mut rv = Self {
@@ -63,6 +66,7 @@ impl ShadowRenderElement {
                 alpha,
                 window_geometry,
                 window_corner_radius,
+                exponent,
             },
         };
         rv.update_inner();
@@ -83,6 +87,7 @@ impl ShadowRenderElement {
                 alpha: 1.,
                 window_geometry: Default::default(),
                 window_corner_radius: Default::default(),
+                exponent: 2.8,
             },
         }
     }
@@ -103,6 +108,7 @@ impl ShadowRenderElement {
         window_geometry: Rectangle<f64, Logical>,
         window_corner_radius: CornerRadius,
         alpha: f32,
+        exponent: f32,
     ) {
         let params = Parameters {
             size,
@@ -114,6 +120,7 @@ impl ShadowRenderElement {
             scale,
             window_geometry,
             window_corner_radius,
+            exponent,
         };
         if self.params == params {
             return;
@@ -134,6 +141,7 @@ impl ShadowRenderElement {
             scale,
             window_geometry,
             window_corner_radius,
+            exponent,
         } = self.params;
 
         let area_size = Vec2::new(size.w as f32, size.h as f32);
@@ -168,6 +176,7 @@ impl ShadowRenderElement {
                     "window_corner_radius",
                     <[f32; 4]>::from(window_corner_radius),
                 ),
+                Uniform::new("exponent", exponent),
             ]),
             HashMap::new(),
         );

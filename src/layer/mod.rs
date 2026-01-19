@@ -32,6 +32,8 @@ pub struct ResolvedLayerRules {
 
     /// Whether to bob this window up and down.
     pub baba_is_float: bool,
+
+    pub exponent: Option<f32>,
 }
 
 impl ResolvedLayerRules {
@@ -62,6 +64,7 @@ impl ResolvedLayerRules {
             place_within_backdrop: false,
             baba_is_float: false,
             transparent_block: None,
+            exponent: None,
         }
     }
 
@@ -106,6 +109,9 @@ impl ResolvedLayerRules {
             }
             if let Some(x) = rule.transparent_block {
                 resolved.transparent_block = Some(x);
+            }
+            if let Some(x) = rule.rounding_exponent {
+                resolved.exponent = Some(x);
             }
 
             resolved.shadow.merge_with(&rule.shadow);

@@ -710,7 +710,7 @@ fn print_window(window: &Window) {
         tile_pos_in_workspace_view,
         window_offset_in_tile,
         window_location,
-        monitor_name
+        monitor_name,
     } = &window.layout;
 
     println!("  Layout:");
@@ -748,10 +748,7 @@ fn print_window(window: &Window) {
     }
 
     if let Some(name) = monitor_name {
-        println!(
-            "    Monitor name: {}",
-            name
-        );
+        println!("    Monitor name: {}", name);
     }
 }
 

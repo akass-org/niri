@@ -168,7 +168,7 @@ pub trait LayoutElement {
         fx_buffers: Option<EffectsFramebufffersUserData>,
         push: &mut dyn FnMut(LayoutElementRenderElement<R>),
     ) {
-        self.render_popups(renderer, location, scale, alpha, target, fx_buffers,push);
+        self.render_popups(renderer, location, scale, alpha, target, fx_buffers, push);
         self.render_normal(renderer, location, scale, alpha, target, push);
     }
 
@@ -196,7 +196,7 @@ pub trait LayoutElement {
         fx_buffers: Option<EffectsFramebufffersUserData>,
         push: &mut dyn FnMut(LayoutElementRenderElement<R>),
     ) {
-        let _ = (renderer, location, scale, alpha, target,fx_buffers, push);
+        let _ = (renderer, location, scale, alpha, target, fx_buffers, push);
     }
 
     /// Requests the element to change its size.

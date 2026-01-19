@@ -253,6 +253,8 @@ impl TabIndicator {
             let radius = radius.fit_to(rect.size.w as f32, rect.size.h as f32);
             tabs_left -= 1;
 
+            let exponent = self.config.exponent;
+
             shader.update(
                 rect.size,
                 gradient_area,
@@ -265,6 +267,7 @@ impl TabIndicator {
                 radius,
                 scale as f32,
                 1.,
+                exponent,
             );
         }
     }

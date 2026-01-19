@@ -395,6 +395,7 @@ impl<W: LayoutElement> Workspace<W> {
             CornerRadius::default(),
             self.scale.fractional_scale(),
             1.,
+            2.8,
         );
     }
 

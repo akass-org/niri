@@ -492,6 +492,9 @@ impl<W: LayoutElement> Tile<W> {
                 radius.expanded_by(border_width as f32)
             })
             .scaled_by(1. - expanded_progress as f32);
+
+        let exponent = rules.rounding_exponent.unwrap_or(2.8);
+
         self.border.update_render_elements(
             border_window_size,
             is_active,
@@ -504,6 +507,7 @@ impl<W: LayoutElement> Tile<W> {
             radius,
             self.scale,
             1. - expanded_progress as f32,
+            exponent,
         );
 
         let radius = if self.visual_border_width().is_some() {
@@ -521,6 +525,7 @@ impl<W: LayoutElement> Tile<W> {
             radius,
             self.scale,
             1. - expanded_progress as f32,
+            exponent,
         );
 
         let draw_focus_ring_with_background = if self.border.is_off() {
@@ -538,6 +543,7 @@ impl<W: LayoutElement> Tile<W> {
             radius,
             self.scale,
             1. - expanded_progress as f32,
+            exponent,
         );
 
         self.fullscreen_backdrop.resize(animated_tile_size);
@@ -1187,6 +1193,7 @@ impl<W: LayoutElement> Tile<W> {
             }
         }
 
+        let exponent = rules.rounding_exponent.unwrap_or(2.8);
         // If we're not resizing, render the window itself.
         let has_border_shader = BorderRenderElement::has_shader(renderer);
         if !pushed_resize {
@@ -1206,6 +1213,7 @@ impl<W: LayoutElement> Tile<W> {
                                     geo,
                                     shader.clone(),
                                     radius,
+                                    exponent,
                                 )
                                 .into();
                             }
@@ -1235,6 +1243,7 @@ impl<W: LayoutElement> Tile<W> {
                             radius,
                             scale.x as f32,
                             1.,
+                            exponent,
                         )
                         .with_location(geo.loc)
                         .into();
@@ -1291,6 +1300,7 @@ impl<W: LayoutElement> Tile<W> {
                     radius,
                     scale.x as f32,
                     alpha,
+                    exponent,
                 )
                 .with_location(location);
                 push(elem.into());

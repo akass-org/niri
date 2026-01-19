@@ -131,6 +131,8 @@ pub struct ResolvedWindowRules {
     pub force_render: Option<bool>,
 
     pub force_render_fps: Option<u16>,
+
+    pub rounding_exponent: Option<f32>,
 }
 
 impl<'a> WindowRef<'a> {
@@ -323,6 +325,10 @@ impl ResolvedWindowRules {
 
                 if let Some(x) = rule.transparent_block {
                     resolved.transparent_block = Some(x);
+                }
+
+                if let Some(x) = rule.rounding_exponent {
+                    resolved.rounding_exponent = Some(x);
                 }
             }
 

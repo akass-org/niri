@@ -26,21 +26,37 @@ uniform float niri_scale;
 uniform vec2 geo_size;
 uniform vec4 corner_radius;
 uniform mat3 input_to_geo;
+uniform float exponent;
 
 /* ================= SDF rounded rect ================= */
 
-float rounding_alpha(vec2 p, vec2 size) {
+float rounding_alpha(vec2 p, vec2 s, vec4 r) {
+    // anti-alias
     float aa = 0.5 / niri_scale;
 
-    // center-based SDF (IQ style, asymmetric radius)
-    vec2 q = abs(p - size * 0.5) - size * 0.5;
+    // 坐标中心化（相对于矩形中心）
+    vec2 offset = p - s * 0.5;
 
-    float rx = mix(corner_radius.x, corner_radius.y, step(0.0, q.x));
-    float ry = mix(corner_radius.w, corner_radius.z, step(0.0, q.x));
-    float r  = mix(rx, ry, step(0.0, q.y));
+    // 四角半径
+    float rx = mix(r.x, r.y, step(0.0, offset.x));
+    float ry = mix(r.w, r.z, step(0.0, offset.x));
+    float rad = mix(rx, ry, step(0.0, offset.y));
 
-    float d = length(max(q + r, 0.0)) - r;
-    return 1.0 - smoothstep(-aa, aa, d);
+    // 局部角落坐标
+    vec2 q = abs(offset) - (s * 0.5 - rad);
+
+    // ------------------------
+    // FG-squircle 核心公式
+    vec2 corner = max(q, 0.0);      // 角落部分
+    float dist = pow(pow(corner.x, exponent) + pow(corner.y, exponent), 1.0/exponent) - rad;
+
+    // ------------------------
+    // 内部 alpha 修正：中心和边沿
+    float inside = min(max(q.x, q.y), 0.0); // q<0 时表示在矩形内部
+    dist += inside;
+
+    // 返回 alpha
+    return 1.0 - smoothstep(-aa, aa, dist);
 }
 
 void main() {
@@ -62,7 +78,7 @@ void main() {
 
     // rounded rect alpha
     float round =
-        rounding_alpha(geo * geo_size, geo_size);
+        rounding_alpha(geo * geo_size, geo_size, corner_radius);
 
     color *= inside * round;
 

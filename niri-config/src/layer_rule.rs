@@ -24,6 +24,8 @@ pub struct LayerRule {
     pub baba_is_float: Option<bool>,
     #[knuffel(child, unwrap(argument))]
     pub transparent_block: Option<bool>,
+    #[knuffel(child, unwrap(argument))]
+    pub rounding_exponent: Option<f32>,
 }
 
 #[derive(knuffel::Decode, Debug, Default, Clone, PartialEq)]
