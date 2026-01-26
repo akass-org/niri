@@ -79,6 +79,7 @@ impl MappedLayer {
         shadow_config.on = false;
         shadow_config.merge_with(&rules.shadow);
 
+        // debug!("layer blur config {:?} {:?}", config.layout.blur,&rules.blur);
         let mut blur_config = config.layout.blur;
         blur_config.on = false;
         blur_config.merge_with(&rules.blur);
@@ -102,6 +103,12 @@ impl MappedLayer {
         shadow_config.on = false;
         shadow_config.merge_with(&self.rules.shadow);
         self.shadow.update_config(shadow_config);
+
+        // Update blur config as well.
+        let mut blur_config = config.layout.blur;
+        blur_config.on = false;
+        blur_config.merge_with(&self.rules.blur);
+        self.blur_config = blur_config;
     }
 
     pub fn update_shaders(&mut self) {

@@ -22,9 +22,7 @@ window-rule {
 >
 > blur passes 上限 8
 
-popup blur 与 layout blur 同步，也可以单独添加 window rule，layer blur 需要在 layer rule 添加 blur 配置块。
-
-layer blur 非实时更新，需要重开对应 layer（例如 qs 的 bar 需要重启，而启动器是使用时创建 layer 就不需要重启）
+popup blur 与 layout blur 同步，也可以单独添加 window rule，layer blur 需要在 layer rule 主动添加 blur 配置块（防止 layer 面积过大导致 blur 后看不见操作画面）。
 
 例：
 
