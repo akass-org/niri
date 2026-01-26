@@ -4,51 +4,40 @@ pub mod element;
 pub mod optimized_blur_texture_element;
 pub(super) mod shader;
 
-use anyhow::Context;
 use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 
 use glam::{Mat3, Vec2};
 use niri_config::Blur;
-use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
-use smithay::backend::renderer::element::AsRenderElements;
 use smithay::backend::renderer::gles::format::fourcc_to_gl_formats;
-use smithay::backend::renderer::gles::{ffi, Capability, GlesError, GlesRenderer, GlesTexture};
-use smithay::backend::renderer::{Bind, Blit, Frame, Offscreen, Renderer, Texture, TextureFilter};
+use smithay::backend::renderer::gles::{ffi, GlesError, GlesRenderer, GlesTexture};
+use smithay::backend::renderer::{Offscreen, Texture};
 use smithay::desktop::LayerMap;
 use smithay::output::Output;
 use smithay::reexports::gbm::Format;
 use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Size, Transform};
-use smithay::wayland::shell::wlr_layer::Layer;
 
 use crate::render_helpers::renderer::{AsGlesRenderer, NiriRenderer};
 use shader::BlurShaders;
 
-use super::render_data::RendererData;
-use super::render_elements;
-use super::shaders::Shaders;
-
+use std::collections::HashMap;
 use std::sync::MutexGuard;
 use std::time::{Duration, Instant};
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-enum CurrentBuffer {
-    /// We are currently sampling from normal buffer, and rendering in the swapped/alternative.
-    #[default]
-    Normal,
-    /// We are currently sampling from swapped buffer, and rendering in the normal.
-    Swapped,
+const MAX_PER_KEY: usize = 2;
+const TTL: Duration = Duration::from_secs(10);
+
+#[derive(Hash, Eq, PartialEq, Clone, Copy, Debug)]
+struct BlurTexKey {
+    width: i32,
+    height: i32,
 }
 
-impl CurrentBuffer {
-    pub fn swap(&mut self) {
-        *self = match self {
-            // sampled from normal, render to swapped
-            Self::Normal => Self::Swapped,
-            // sampled fro swapped, render to normal next
-            Self::Swapped => Self::Normal,
-        }
-    }
+#[derive(Clone, Debug)]
+pub struct BlurObj {
+    tex: GlesTexture,
+    fbo: u32,
+    update_time: Instant,
 }
 
 /// Effect framebuffers associated with each output.
@@ -76,9 +65,14 @@ pub struct EffectsFramebuffers {
     /// Transform of the output.
     transform: Transform,
 
-    sample_effects: Vec<GlesTexture>,
+    // sample_effects: Vec<GlesTexture>,
 
-    sample_fbos: Vec<u32>,
+    // sample_fbos: Vec<u32>,
+    effects: Vec<BlurObj>,
+
+    free: HashMap<BlurTexKey, Vec<BlurObj>>,
+
+    last_gc: Instant,
 }
 
 type EffectsFramebufffersUserData = Rc<RefCell<EffectsFramebuffers>>;
@@ -131,51 +125,14 @@ impl EffectsFramebuffers {
             )
         }
 
-        let mut sample_effects: Vec<GlesTexture> = Vec::new();
-        let mut sample_fbos: Vec<u32> = Vec::new();
-        for i in 0..8 {
-            let size = if i == 0 {
-                texture_size
-            } else {
-                texture_size / (2 as i32).pow(i - 1)
-            };
-            let sample_effect = create_buffer(renderer, size).unwrap();
-            sample_effects.push(sample_effect.clone());
-
-            renderer.with_context(|gl| unsafe {
-                let mut sample_fbo = 0;
-                {
-                    gl.GenFramebuffers(1, &mut sample_fbo as *mut _);
-                    gl.BindFramebuffer(ffi::FRAMEBUFFER, sample_fbo);
-                    gl.FramebufferTexture2D(
-                        ffi::FRAMEBUFFER,
-                        ffi::COLOR_ATTACHMENT0,
-                        ffi::TEXTURE_2D,
-                        sample_effect.tex_id(),
-                        0,
-                    );
-
-                    let status = gl.CheckFramebufferStatus(ffi::FRAMEBUFFER);
-                    if status != ffi::FRAMEBUFFER_COMPLETE {
-                        return Err(GlesError::FramebufferBindingError);
-                    }
-                };
-                gl.BindFramebuffer(ffi::FRAMEBUFFER, 0);
-                sample_fbos.push(sample_fbo);
-                Result::<_, GlesError>::Ok(())
-            });
-        }
-
         let this = EffectsFramebuffers {
             optimized_blur: create_buffer(renderer, texture_size).unwrap(),
             optimized_blur_rerender_at: get_rerender_at(),
-            // effects: create_buffer(renderer, texture_size).unwrap(),
-            // effects_swapped: create_buffer(renderer, texture_size).unwrap(),
-            // current_buffer: CurrentBuffer::Normal,
             transform,
             output_size: texture_size,
-            sample_effects,
-            sample_fbos,
+            effects: Vec::new(),
+            free: HashMap::new(),
+            last_gc: Instant::now(),
         };
 
         let user_data = output.user_data();
@@ -208,51 +165,14 @@ impl EffectsFramebuffers {
             )
         }
 
-        let mut sample_effects: Vec<GlesTexture> = Vec::new();
-        let mut sample_fbos: Vec<u32> = Vec::new();
-        for i in 0..8 {
-            let size = if i == 0 {
-                texture_size
-            } else {
-                texture_size / (2 as i32).pow(i - 1)
-            };
-            let sample_effect = create_buffer(renderer, size).unwrap();
-            sample_effects.push(sample_effect.clone());
-
-            renderer.with_context(|gl| unsafe {
-                let mut sample_fbo = 0;
-                {
-                    gl.GenFramebuffers(1, &mut sample_fbo as *mut _);
-                    gl.BindFramebuffer(ffi::FRAMEBUFFER, sample_fbo);
-                    gl.FramebufferTexture2D(
-                        ffi::FRAMEBUFFER,
-                        ffi::COLOR_ATTACHMENT0,
-                        ffi::TEXTURE_2D,
-                        sample_effect.tex_id(),
-                        0,
-                    );
-
-                    let status = gl.CheckFramebufferStatus(ffi::FRAMEBUFFER);
-                    if status != ffi::FRAMEBUFFER_COMPLETE {
-                        return Err(GlesError::FramebufferBindingError);
-                    }
-                };
-                gl.BindFramebuffer(ffi::FRAMEBUFFER, 0);
-                sample_fbos.push(sample_fbo);
-                Result::<_, GlesError>::Ok(())
-            });
-        }
-
         *fx_buffers = EffectsFramebuffers {
             optimized_blur: create_buffer(renderer, texture_size)?,
             optimized_blur_rerender_at: get_rerender_at(),
-            // effects: create_buffer(renderer, texture_size)?,
-            // effects_swapped: create_buffer(renderer, texture_size)?,
-            // current_buffer: CurrentBuffer::Normal,
             transform,
             output_size: texture_size,
-            sample_effects,
-            sample_fbos,
+            effects: Vec::new(),
+            free: HashMap::new(),
+            last_gc: Instant::now(),
         };
 
         Ok(())
@@ -376,22 +296,15 @@ impl EffectsFramebuffers {
     //     }
     // }
 
-    pub fn sample_buffers(&mut self, i: usize) -> (&GlesTexture, &mut GlesTexture, u32) {
-        let (left, right) = self.sample_effects.split_at_mut(i + 1);
-        (&left[i], &mut right[0], *self.sample_fbos.get(i).unwrap())
+    pub fn sample_buffers(&mut self, i: usize) -> (&BlurObj, &mut BlurObj) {
+        // debug!( "sample_buffers i={} of {}", i,self.sample_effects.len());
+        let (left, right) = self.effects.split_at_mut(i + 1);
+        (&left[i], &mut right[0])
     }
 
-    pub fn sample_buffers_rev(&mut self, i: usize) -> (&mut GlesTexture, &GlesTexture, u32) {
-        let (left, right) = self.sample_effects.split_at_mut(i + 1);
-        (
-            &mut left[i],
-            &right[0],
-            *self.sample_fbos.get(i + 1).unwrap(),
-        )
-    }
-
-    pub fn sample_fbo(&mut self, i: usize) -> u32 {
-        *self.sample_fbos.get(i).unwrap()
+    pub fn sample_buffers_rev(&mut self, i: usize) -> (&mut BlurObj, &BlurObj) {
+        let (left, right) = self.effects.split_at_mut(i + 1);
+        (&mut left[i], &right[0])
     }
 
     // pub fn sample_buffers_rev(&mut self, i: usize) -> (&GlesTexture, &mut GlesTexture) {
@@ -416,6 +329,98 @@ impl EffectsFramebuffers {
     pub fn transform(&self) -> Transform {
         self.transform
     }
+
+    pub fn create_buffer(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        size: Size<i32, Physical>,
+    ) -> BlurObj {
+        let key = BlurTexKey {
+            width: size.w,
+            height: size.h,
+        };
+
+        if let Some(vec) = self.free.get_mut(&key) {
+            if let Some(mut obj) = vec.pop() {
+                // debug!("pop from pool");
+                obj.update_time = Instant::now();
+                return obj;
+            }
+        }
+
+        let tex: GlesTexture = renderer
+            .create_buffer(
+                Format::Abgr8888,
+                size.to_logical(1).to_buffer(1, Transform::Normal),
+            )
+            .unwrap();
+
+        let mut fbo = 0;
+        renderer.with_context(|gl| unsafe {
+            {
+                gl.GenFramebuffers(1, &mut fbo as *mut _);
+                gl.BindFramebuffer(ffi::FRAMEBUFFER, fbo);
+                gl.FramebufferTexture2D(
+                    ffi::FRAMEBUFFER,
+                    ffi::COLOR_ATTACHMENT0,
+                    ffi::TEXTURE_2D,
+                    tex.tex_id(),
+                    0,
+                );
+
+                let status = gl.CheckFramebufferStatus(ffi::FRAMEBUFFER);
+                if status != ffi::FRAMEBUFFER_COMPLETE {
+                    return Err(GlesError::FramebufferBindingError);
+                }
+            };
+            gl.BindFramebuffer(ffi::FRAMEBUFFER, 0);
+            // sample_fbos.push(sample_fbo);
+            Result::<_, GlesError>::Ok(())
+        });
+
+        BlurObj {
+            tex,
+            fbo,
+            update_time: Instant::now(),
+        }
+    }
+
+    pub fn set_sample_buffers(&mut self, sample_buffers: Vec<BlurObj>) {
+        self.gc();
+        for old in self.effects.drain(..) {
+            let size = old.tex.size();
+            let key = BlurTexKey {
+                width: size.w,
+                height: size.h,
+            };
+
+            let vec = self.free.entry(key).or_default();
+
+            if vec.len() > MAX_PER_KEY {
+                // debug!("drop directly");
+                drop(old);
+            } else {
+                // debug!("recycle to pool");
+                self.free.entry(key).or_default().push(old);
+            }
+        }
+        self.effects = sample_buffers;
+    }
+
+    pub fn gc(&mut self) {
+        let now = Instant::now();
+
+        if now.duration_since(self.last_gc) > Duration::from_secs(2) {
+            self.last_gc = now;
+            // debug!("check_gc");
+            self.free.retain(|_, vec| {
+                vec.retain(|obj| now.duration_since(obj.update_time) < TTL);
+
+                // vec 为空就删掉这个 key
+                !vec.is_empty()
+            });
+        }
+    }
 }
 
 pub(super) unsafe fn get_main_buffer_blur(
@@ -434,27 +439,32 @@ pub(super) unsafe fn get_main_buffer_blur(
     alpha_tex: Option<&GlesTexture>,
 ) -> Result<GlesTexture, GlesError> {
     // let effects = fx_buffers.sample_effects.get_mut(0).unwrap();
-    let tex_size = fx_buffers.sample_effects[0]
+    let tex_size = fx_buffers.effects[0]
+        .tex
         .size()
         .to_logical(1, Transform::Normal)
         .to_physical(scale);
 
     let dst_expanded = {
         let mut dst = dst;
-        let size =
-            (2f32.powi(blur_config.passes as i32 + 1) * blur_config.radius.0 as f32).ceil() as i32;
-        dst.loc -= Point::from((size, size)).upscale(8);
-        dst.size += Size::from((size, size)).upscale(16);
+        // let size: i32 =
+        //     (2f32.powi(blur_config.passes as i32 + 1) * blur_config.radius.0 as f32).ceil() as i32;
+        let size = blur_config.radius.0 as i32;
+
+        dst.loc -= Point::from((size, size));
+        dst.size += Size::from((size, size)).upscale(2);
         dst
     };
 
     let mut prev_fbo = 0;
     gl.GetIntegerv(ffi::FRAMEBUFFER_BINDING, &mut prev_fbo as *mut _);
 
-    let (sample_buffer, _, sample_fbo) = fx_buffers.sample_buffers(0);
+    let (sample_buffer, _) = fx_buffers.sample_buffers(0);
+
+    // debug!("damage area {:?} dst_expanded {:?}", dst, dst_expanded);
 
     // First get a fbo for the texture we are about to read into
-    // let mut sample_fbo = 0u32;
+    let mut sample_fbo = sample_buffer.fbo;
     {
         // gl.GenFramebuffers(1, &mut sample_fbo as *mut _);
         gl.BindFramebuffer(ffi::DRAW_FRAMEBUFFER, sample_fbo);
@@ -462,7 +472,7 @@ pub(super) unsafe fn get_main_buffer_blur(
             ffi::FRAMEBUFFER,
             ffi::COLOR_ATTACHMENT0,
             ffi::TEXTURE_2D,
-            sample_buffer.tex_id(),
+            sample_buffer.tex.tex_id(),
             0,
         );
         gl.Clear(ffi::COLOR_BUFFER_BIT);
@@ -490,10 +500,10 @@ pub(super) unsafe fn get_main_buffer_blur(
             let src_y0 = dst_expanded.loc.y;
             let src_x1 = dst_expanded.loc.x + dst_expanded.size.w;
             let src_y1 = dst_expanded.loc.y + dst_expanded.size.h;
-            let dst_x0 = src_x0;
-            let dst_y0 = src_y0;
-            let dst_x1 = src_x1;
-            let dst_y1 = src_y1;
+            let dst_x0 = 0;
+            let dst_y0 = 0;
+            let dst_x1 = dst_expanded.size.w;
+            let dst_y1 = dst_expanded.size.h;
 
             gl.BlitFramebuffer(
                 src_x0,
@@ -546,9 +556,10 @@ pub(super) unsafe fn get_main_buffer_blur(
         //     0.5 / (tex_size.h as f32 / 2.0),
         // ];
         for i in 0..passes {
-            let (sample_buffer, render_buffer, render_buffer_fbo) = fx_buffers.sample_buffers(i);
-            let damage = dst_expanded.downscale(1 << (i + 1));
-            let tex_size_down = sample_buffer.size(); // 当前 FBO 尺寸
+            let (sample_buffer, render_buffer) = fx_buffers.sample_buffers(i);
+            // let (sample_buffer, render_buffer) = get_tex(tex_vec,i);
+            let render_buffer_fbo = render_buffer.fbo;
+            let tex_size_down = sample_buffer.tex.size(); // 当前 FBO 尺寸
             let half_pixel = [0.5 / tex_size_down.w as f32, 0.5 / tex_size_down.h as f32];
             render_blur_pass_with_gl(
                 gl,
@@ -556,13 +567,12 @@ pub(super) unsafe fn get_main_buffer_blur(
                 debug,
                 supports_instancing,
                 projection_matrix,
-                sample_buffer,
-                render_buffer,
+                &sample_buffer.tex,
+                &mut render_buffer.tex,
                 scale,
                 &shaders.down,
                 half_pixel,
                 blur_config.clone(),
-                damage,
                 render_buffer_fbo,
                 i,
             )?;
@@ -575,10 +585,10 @@ pub(super) unsafe fn get_main_buffer_blur(
         // ];
         for i in (0..passes).rev() {
             // let (sample_buffer, render_buffer) = fx_buffers.buffers();
-            let (render_buffer, sample_buffer, render_buffer_fbo) =
-                fx_buffers.sample_buffers_rev(i);
-            let damage = dst_expanded.downscale(1 << (passes - 1 - i));
-            let tex_size_down = sample_buffer.size(); // 当前 FBO 尺寸
+            let (render_buffer, sample_buffer) = fx_buffers.sample_buffers_rev(i);
+            // let (render_buffer, sample_buffer) = get_tex_rev(tex_vec,i);
+            let render_buffer_fbo = render_buffer.fbo;
+            let tex_size_down = sample_buffer.tex.size(); // 当前 FBO 尺寸
             let half_pixel = [0.5 / tex_size_down.w as f32, 0.5 / tex_size_down.h as f32];
             render_blur_pass_with_gl(
                 gl,
@@ -586,13 +596,12 @@ pub(super) unsafe fn get_main_buffer_blur(
                 debug,
                 supports_instancing,
                 projection_matrix,
-                sample_buffer,
-                render_buffer,
+                &sample_buffer.tex,
+                &mut render_buffer.tex,
                 scale,
                 &shaders.up,
                 half_pixel,
                 blur_config.clone(),
-                damage,
                 render_buffer_fbo,
                 i,
             )?;
@@ -602,11 +611,11 @@ pub(super) unsafe fn get_main_buffer_blur(
 
     // Cleanup
     {
-        // gl.DeleteFramebuffers(1, &mut sample_fbo as *mut _);
+        gl.DeleteFramebuffers(1, &mut sample_fbo as *mut _);
         gl.BindFramebuffer(ffi::FRAMEBUFFER, prev_fbo as u32);
     }
 
-    Ok(fx_buffers.sample_effects[0].clone())
+    Ok(fx_buffers.effects[0].tex.clone())
 }
 
 // Renders a blur pass using a GlesFrame with syncing and fencing provided by smithay. Used for
@@ -793,7 +802,7 @@ unsafe fn render_blur_pass_with_gl(
     config: Blur,
     // dst is the region that should have blur
     // it gets up/downscaled with passes
-    _damage: Rectangle<i32, Physical>,
+    // _damage: Rectangle<i32, Physical>,
     render_buffer_fbo: u32,
     i: usize,
 ) -> Result<(), GlesError> {
@@ -806,6 +815,7 @@ unsafe fn render_blur_pass_with_gl(
 
     let damage = dest;
 
+    // debug!("damage = {:?}", damage);
     // FIXME: Should we call gl.Finish() when done rendering this pass? If yes, should we check
     // if the gl context is shared or not? What about fencing, we don't have access to that
 
@@ -940,7 +950,7 @@ unsafe fn render_blur_pass_with_gl(
     // Clean up
     {
         gl.Enable(ffi::BLEND);
-        // gl.DeleteFramebuffers(1, &render_buffer_fbo as *const _);
+        gl.DeleteFramebuffers(1, &render_buffer_fbo as *const _ as *mut _);
         gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA);
         gl.BindFramebuffer(ffi::FRAMEBUFFER, 0);
     }
@@ -964,6 +974,8 @@ fn build_texture_mat(
     let scale_x = src.size.w as f32 / texture.w as f32;
     let scale_y = src.size.h as f32 / texture.h as f32;
     let mut tex_mat = Mat3::from_scale(Vec2::new(scale_x, scale_y));
+
+    debug!("make matrix {:?}x{:?} {:?}", scale_x, scale_y, src);
 
     // then compensate for the texture transform
     let transform_mat = Mat3::from_cols_array(transform.matrix().as_ref());

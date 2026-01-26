@@ -67,7 +67,14 @@ float fast_rounding_alpha(vec2 coords, vec2 size, float radius) {
 // }
 
 void main() {
-    vec4 color = texture2D(tex, v_coords);
+
+    vec2 screen_coord = gl_FragCoord.xy;
+    vec2 window_coord = (screen_coord - geo.xy) / geo.zw;
+    
+    // 确保在纹理范围内
+    window_coord = clamp(window_coord, 0.0, 1.0);
+
+    vec4 color = texture2D(tex, window_coord);
 
 #if defined(NO_ALPHA)
     color = vec4(color.rgb, 1.0);
@@ -98,6 +105,8 @@ void main() {
     color *= alphaMask;
 
     gl_FragColor = color;
+
+    // gl_FragColor = vec4(window_coord, 0.0, 1.0);
 }
 
 // vim: ft=glsl

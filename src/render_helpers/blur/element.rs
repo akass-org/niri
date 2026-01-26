@@ -6,7 +6,7 @@ use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
 use smithay::backend::renderer::gles::{GlesError, GlesFrame, GlesRenderer, GlesTexture, Uniform};
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
-use smithay::backend::renderer::Renderer;
+use smithay::backend::renderer::{Offscreen, Renderer};
 use smithay::output::Output;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
@@ -16,9 +16,11 @@ use crate::render_helpers::renderer::{AsGlesFrame, NiriRenderer};
 use crate::render_helpers::shaders::Shaders;
 
 use super::optimized_blur_texture_element::OptimizedBlurTextureElement;
-use super::{CurrentBuffer, EffectsFramebuffers};
+use super::{ EffectsFramebuffers};
+use smithay::reexports::gbm::Format;
 use std::cell::RefCell;
 use std::rc::Rc;
+use libc::FAN_INFO;
 
 pub type EffectsFramebufffersUserData = Rc<RefCell<EffectsFramebuffers>>;
 
@@ -57,6 +59,16 @@ pub enum BlurRenderElement {
 }
 
 impl BlurRenderElement {
+    // pub fn create_buffer(
+    //     renderer: &mut GlesRenderer,
+    //     size: Size<i32, Physical>,
+    // ) -> Result<GlesTexture, GlesError> {
+    //     renderer.create_buffer(
+    //         Format::Abgr8888,
+    //         size.to_logical(1).to_buffer(1, Transform::Normal),
+    //     )
+    // }
+
     /// Create a new [`BlurElement`]. You are supposed to put this **below** the translucent surface
     /// that you want to blur. `area` is assumed to be relative to the `output` you are rendering
     /// in.
@@ -77,56 +89,112 @@ impl BlurRenderElement {
         zoom: f64,
         alpha_tex: Option<GlesTexture>,
     ) -> Self {
-        let texture = fx_buffers.borrow().optimized_blur.clone();
+        // let texture = fx_buffers.borrow().optimized_blur.clone();
 
         let mut final_sample_area = sample_area.to_f64().upscale(zoom);
-        let center = (fx_buffers.borrow().output_size.to_f64().to_logical(scale) / 2.).to_point();
-        final_sample_area.loc.x = center.x - (center.x - sample_area.loc.x as f64) * zoom;
-        final_sample_area.loc.y = center.y - (center.y - sample_area.loc.y as f64) * zoom;
+        {
+            let output_size = fx_buffers.borrow().output_size.clone();
 
-        if optimized {
-            // let scaled = sample_area.to_f64().upscale(scale);
+            let center = (output_size.to_f64().to_logical(scale) / 2.).to_point();
+            final_sample_area.loc.x = center.x - (center.x - sample_area.loc.x as f64) * zoom;
+            final_sample_area.loc.y = center.y - (center.y - sample_area.loc.y as f64) * zoom;
+        }
 
-            let texture = TextureRenderElement::from_static_texture(
-                Id::new(),
-                renderer.as_gles_renderer().context_id(),
-                loc.to_f64(),
-                texture,
-                1,
-                Transform::Normal,
-                Some(1.0),
-                Some(final_sample_area),
-                Some(final_sample_area.size.to_i32_ceil()),
-                // NOTE: Since this is "optimized" blur, anything below the window will not be
-                // rendered
-                Some(vec![Rectangle::new(
-                    final_sample_area.loc.to_i32_ceil(),
-                    final_sample_area.size.to_i32_ceil(),
-                )
-                .to_buffer(1, Transform::Normal, &sample_area.size)]),
-                Kind::Unspecified,
+        // if optimized {
+        //     // let scaled = sample_area.to_f64().upscale(scale);
+
+        //     let texture = TextureRenderElement::from_static_texture(
+        //         Id::new(),
+        //         renderer.as_gles_renderer().context_id(),
+        //         loc.to_f64(),
+        //         texture,
+        //         1,
+        //         Transform::Normal,
+        //         Some(1.0),
+        //         Some(final_sample_area),
+        //         Some(final_sample_area.size.to_i32_ceil()),
+        //         // NOTE: Since this is "optimized" blur, anything below the window will not be
+        //         // rendered
+        //         Some(vec![Rectangle::new(
+        //             final_sample_area.loc.to_i32_ceil(),
+        //             final_sample_area.size.to_i32_ceil(),
+        //         )
+        //         .to_buffer(1, Transform::Normal, &sample_area.size)]),
+        //         Kind::Unspecified,
+        //     );
+
+        //     Self::Optimized {
+        //         tex: texture.into(),
+        //         corner_radius,
+        //         noise: config.noise.0 as f32,
+        //         scale,
+        //     }
+        // } else {
+        //     let mut tex_vec = Vec::new();
+        //     for i in 0..(config.passes + 1) {
+        //         let downscale = if i <= 1 { 1 } else { i as i32 };
+        //         let tex = fx_buffers
+        //             .borrow()
+        //             .create_buffer(
+        //                 renderer.as_gles_renderer(),
+        //                 sample_area
+        //                     .size
+        //                     .downscale((downscale, downscale))
+        //                     .to_physical(scale as i32),
+        //             )
+        //             .unwrap();
+        //         tex_vec.push(tex);
+        //     }
+
+        //     fx_buffers.borrow_mut().set_sample_buffers(tex_vec);
+
+        //     Self::TrueBlur {
+        //         id: Id::new(),
+        //         scale,
+        //         src: final_sample_area,
+        //         transform: Transform::Normal,
+        //         size: sample_area.size,
+        //         corner_radius,
+        //         loc,
+        //         config,
+        //         commit_counter: CommitCounter::default(),
+        //         fx_buffers,
+        //         alpha_tex,
+        //     }
+        // }
+
+        // debug!("sample_area: {:?}", sample_area);
+
+        let mut tex_vec = Vec::new();
+        for i in 0..(config.passes + 2) {
+            let downscale = if i == 0 { 1 } else { (2 as i32).pow(i - 1) };
+            let size = sample_area.size;
+            let tex = fx_buffers.borrow_mut().create_buffer(
+                renderer.as_gles_renderer(),
+                size.downscale((downscale, downscale))
+                    .to_physical(scale as i32),
             );
+            tex_vec.push(tex);
+        }
 
-            Self::Optimized {
-                tex: texture.into(),
-                corner_radius,
-                noise: config.noise.0 as f32,
-                scale,
-            }
-        } else {
-            Self::TrueBlur {
-                id: Id::new(),
-                scale,
-                src: final_sample_area,
-                transform: Transform::Normal,
-                size: sample_area.size,
-                corner_radius,
-                loc,
-                config,
-                commit_counter: CommitCounter::default(),
-                fx_buffers,
-                alpha_tex,
-            }
+        {
+            let mut fx_borrow = fx_buffers.borrow_mut();
+            fx_borrow.set_sample_buffers(tex_vec);
+            drop(fx_borrow);
+        }
+
+        Self::TrueBlur {
+            id: Id::new(),
+            scale,
+            src: final_sample_area,
+            transform: Transform::Normal,
+            size: sample_area.size,
+            corner_radius,
+            loc,
+            config,
+            commit_counter: CommitCounter::default(),
+            fx_buffers,
+            alpha_tex,
         }
     }
 }
@@ -299,6 +367,7 @@ fn draw_true_blur(
         ),
         Uniform::new("alpha_tex", 1),
     ];
+
 
     gles_frame.render_texture_from_to(
         &blurred_texture,
