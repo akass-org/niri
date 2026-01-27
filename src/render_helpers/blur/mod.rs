@@ -908,6 +908,10 @@ unsafe fn render_blur_pass_with_gl(
             if i == 0 { 0.0 } else { config.radius.0 as f32 },
         );
         gl.Uniform2f(program.uniform_half_pixel, half_pixel[0], half_pixel[1]);
+        gl.Uniform1f(
+            program.uniform_scale,
+            scale as f32,
+        );
 
         gl.EnableVertexAttribArray(program.attrib_vert as u32);
         gl.BindBuffer(ffi::ARRAY_BUFFER, vbos[0]);

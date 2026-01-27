@@ -762,7 +762,7 @@ impl MergeWith<Self> for BorderRule {
 impl MergeWith<Self> for BlurRule {
     fn merge_with(&mut self, part: &Self) {
         merge_on_off!((self, part));
-        merge_clone_opt!((self, part), passes, radius, noise, ignore_alpha);
+        merge_clone_opt!((self, part), passes, radius, noise, ignore_alpha,blur_when_keyboard_focused);
     }
 }
 

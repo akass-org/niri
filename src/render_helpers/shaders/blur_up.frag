@@ -12,9 +12,10 @@ uniform sampler2D tex;
 varying vec2 niri_v_coords;
 uniform vec2 half_pixel;
 uniform float radius;
+uniform float scale;
 
 void main() {
-    vec2 uv = niri_v_coords / 2.0;
+    vec2 uv = niri_v_coords / scale;
     if (radius == 0.0) {
         gl_FragColor = texture2D(tex, uv);
         return;

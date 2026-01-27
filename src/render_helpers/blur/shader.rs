@@ -89,6 +89,7 @@ impl BlurShader {
             // let alpha = c"alpha";
             let radius = c"radius";
             let half_pixel = c"half_pixel";
+            let scale = c"scale";
 
             Ok(BlurShaderVariant {
                 normal: BlurShaderProgram {
@@ -109,6 +110,8 @@ impl BlurShader {
                         program,
                         half_pixel.as_ptr() as *const ffi::types::GLchar,
                     ),
+                    uniform_scale: gl
+                        .GetUniformLocation(program, scale.as_ptr() as *const ffi::types::GLchar),
                     attrib_vert: gl
                         .GetAttribLocation(program, vert.as_ptr() as *const ffi::types::GLchar),
                     attrib_vert_position: gl.GetAttribLocation(
@@ -142,6 +145,8 @@ impl BlurShader {
                         debug_program,
                         half_pixel.as_ptr() as *const ffi::types::GLchar,
                     ),
+                    uniform_scale: gl
+                        .GetUniformLocation(program, scale.as_ptr() as *const ffi::types::GLchar),
                     attrib_vert: gl.GetAttribLocation(
                         debug_program,
                         vert.as_ptr() as *const ffi::types::GLchar,
@@ -176,6 +181,7 @@ pub struct BlurShaderProgram {
     // pub(super) uniform_alpha: ffi::types::GLint,
     pub(super) uniform_radius: ffi::types::GLint,
     pub(super) uniform_half_pixel: ffi::types::GLint,
+    pub(super) uniform_scale: ffi::types::GLint,
     pub(super) attrib_vert: ffi::types::GLint,
     pub(super) attrib_vert_position: ffi::types::GLint,
 }
