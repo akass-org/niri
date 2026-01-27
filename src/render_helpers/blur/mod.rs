@@ -137,7 +137,7 @@ impl EffectsFramebuffers {
             let size = if i == 0 {
                 texture_size
             } else {
-                texture_size / (2 as i32).pow(i - 1)
+                texture_size / (2 as i32).pow(i)
             };
             let sample_effect = create_buffer(renderer, size).unwrap();
             sample_effects.push(sample_effect.clone());
@@ -214,7 +214,7 @@ impl EffectsFramebuffers {
             let size = if i == 0 {
                 texture_size
             } else {
-                texture_size / (2 as i32).pow(i - 1)
+                texture_size / (2 as i32).pow(i)
             };
             let sample_effect = create_buffer(renderer, size).unwrap();
             sample_effects.push(sample_effect.clone());
@@ -550,6 +550,10 @@ pub(super) unsafe fn get_main_buffer_blur(
             let damage = dst_expanded.downscale(1 << (i + 1));
             let tex_size_down = sample_buffer.size(); // 当前 FBO 尺寸
             let half_pixel = [0.5 / tex_size_down.w as f32, 0.5 / tex_size_down.h as f32];
+            debug!(
+                "dst_expanded {:?} tex_size_down {:?}",
+                dst_expanded, tex_size_down
+            );
             render_blur_pass_with_gl(
                 gl,
                 vbos,
@@ -558,7 +562,8 @@ pub(super) unsafe fn get_main_buffer_blur(
                 projection_matrix,
                 sample_buffer,
                 render_buffer,
-                scale,
+                // if i == 0 {4.} else {2.},
+                2.,
                 &shaders.down,
                 half_pixel,
                 blur_config.clone(),
@@ -588,7 +593,8 @@ pub(super) unsafe fn get_main_buffer_blur(
                 projection_matrix,
                 sample_buffer,
                 render_buffer,
-                scale,
+                // if i == 0 {4.} else {2.},
+                2.,
                 &shaders.up,
                 half_pixel,
                 blur_config.clone(),
@@ -786,7 +792,8 @@ unsafe fn render_blur_pass_with_gl(
     // The buffers used for blurring
     sample_buffer: &GlesTexture,
     render_buffer: &mut GlesTexture,
-    scale: i32,
+    // For downsamlpe
+    scale: f64,
     // The current blur program + config
     blur_program: &shader::BlurShader,
     half_pixel: [f32; 2],
@@ -801,10 +808,12 @@ unsafe fn render_blur_pass_with_gl(
     let src = Rectangle::from_size(tex_size.to_f64());
     let dest = src
         .to_logical(1.0, Transform::Normal, &src.size)
-        .to_physical(scale as f64)
+        .to_physical(scale)
         .to_i32_round();
 
     let damage = dest;
+
+    // debug!("sample {:?}",tex_size);
 
     // FIXME: Should we call gl.Finish() when done rendering this pass? If yes, should we check
     // if the gl context is shared or not? What about fencing, we don't have access to that
