@@ -201,8 +201,6 @@ impl MappedLayer {
         fx_buffers: Option<EffectsFramebufffersUserData>,
         push: &mut dyn FnMut(LayerSurfaceRenderElement<R>),
     ) {
-        let mut gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> = None;
-
         let scale = Scale::from(self.scale);
         let alpha = self.rules.opacity.unwrap_or(1.).clamp(0., 1.);
         let location = location + self.bob_offset();
@@ -236,23 +234,26 @@ impl MappedLayer {
                 &mut |elem| push(elem.into()),
             );
 
-            gles_elems = Some(render_elements_from_surface_tree(
-                renderer.as_gles_renderer(),
-                surface,
-                buf_pos.to_physical_precise_round(scale),
-                scale,
-                alpha,
-                Kind::ScanoutCandidate,
-            ));
-
             if self.blur_config.on
+                && (!self.blur_config.blur_when_keyboard_focused
+                    || self.blur_config.blur_when_keyboard_focused
+                        && self.surface.can_receive_keyboard_focus())
             /* && matches!(self.surface.layer(), Layer::Top | Layer::Overlay) */
             {
                 if let Some(fx_buffers) = fx_buffers {
                     let fx_buffers_rc = fx_buffers;
                     let fx_buffers = fx_buffers_rc.borrow();
 
-                    // debug!("render layer blur {:?}", self.rules.blur);
+                    let gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> =
+                        Some(render_elements_from_surface_tree(
+                            renderer.as_gles_renderer(),
+                            surface,
+                            buf_pos.to_physical_precise_round(scale),
+                            scale,
+                            alpha,
+                            Kind::ScanoutCandidate,
+                        ));
+
                     // TODO: respect sync point?
                     let alpha_tex = gles_elems
                         .and_then(|gles_elems| {
@@ -328,8 +329,6 @@ impl MappedLayer {
 
             let size = popup.geometry().size.to_f64();
 
-            let mut gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> = None;
-
             {
                 push_elements_from_surface_tree(
                     renderer,
@@ -342,18 +341,20 @@ impl MappedLayer {
                 );
             }
 
-            gles_elems = Some(render_elements_from_surface_tree(
-                renderer.as_gles_renderer(),
-                popup.wl_surface(),
-                (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
-                scale,
-                alpha,
-                Kind::ScanoutCandidate,
-            ));
-
             if self.blur_config.on {
                 if let Some(fx_buffers_rc) = fx_buffers.as_ref() {
                     let fx_buffers = fx_buffers_rc.borrow();
+
+                    let gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> =
+                        Some(render_elements_from_surface_tree(
+                            renderer.as_gles_renderer(),
+                            popup.wl_surface(),
+                            (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
+                            scale,
+                            alpha,
+                            Kind::ScanoutCandidate,
+                        ));
+
                     let alpha_tex = gles_elems
                         .and_then(|gles_elems| {
                             let transform = fx_buffers.transform();

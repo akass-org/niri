@@ -130,7 +130,7 @@ impl EffectsFramebuffers {
                 size.to_logical(1).to_buffer(1, Transform::Normal),
             )
         }
-
+ 
         let mut sample_effects: Vec<GlesTexture> = Vec::new();
         let mut sample_fbos: Vec<u32> = Vec::new();
         for i in 0..8 {
@@ -441,10 +441,11 @@ pub(super) unsafe fn get_main_buffer_blur(
 
     let dst_expanded = {
         let mut dst = dst;
-        let size =
-            (2f32.powi(blur_config.passes as i32 + 1) * blur_config.radius.0 as f32).ceil() as i32;
-        dst.loc -= Point::from((size, size)).upscale(8);
-        dst.size += Size::from((size, size)).upscale(16);
+        // let size =
+        //     (2f32.powi(blur_config.passes as i32 + 1) * blur_config.radius.0 as f32).ceil() as i32;
+        let size= blur_config.radius.0 as i32;
+        dst.loc -= Point::from((size, size));
+        dst.size += Size::from((size, size)).upscale(2);
         dst
     };
 
@@ -547,13 +548,13 @@ pub(super) unsafe fn get_main_buffer_blur(
         // ];
         for i in 0..passes {
             let (sample_buffer, render_buffer, render_buffer_fbo) = fx_buffers.sample_buffers(i);
-            let damage = dst_expanded.downscale(1 << (i + 1));
+            // let damage = dst_expanded.downscale(1 << (i + 1));
             let tex_size_down = sample_buffer.size(); // 当前 FBO 尺寸
             let half_pixel = [0.5 / tex_size_down.w as f32, 0.5 / tex_size_down.h as f32];
-            debug!(
-                "dst_expanded {:?} tex_size_down {:?}",
-                dst_expanded, tex_size_down
-            );
+            // debug!(
+            //     "dst_expanded {:?} tex_size_down {:?}",
+            //     dst_expanded, tex_size_down
+            // );
             render_blur_pass_with_gl(
                 gl,
                 vbos,
@@ -567,7 +568,7 @@ pub(super) unsafe fn get_main_buffer_blur(
                 &shaders.down,
                 half_pixel,
                 blur_config.clone(),
-                damage,
+                // damage,
                 render_buffer_fbo,
                 i,
             )?;
@@ -582,7 +583,7 @@ pub(super) unsafe fn get_main_buffer_blur(
             // let (sample_buffer, render_buffer) = fx_buffers.buffers();
             let (render_buffer, sample_buffer, render_buffer_fbo) =
                 fx_buffers.sample_buffers_rev(i);
-            let damage = dst_expanded.downscale(1 << (passes - 1 - i));
+            // let damage = dst_expanded.downscale(1 << (passes - 1 - i));
             let tex_size_down = sample_buffer.size(); // 当前 FBO 尺寸
             let half_pixel = [0.5 / tex_size_down.w as f32, 0.5 / tex_size_down.h as f32];
             render_blur_pass_with_gl(
@@ -598,7 +599,7 @@ pub(super) unsafe fn get_main_buffer_blur(
                 &shaders.up,
                 half_pixel,
                 blur_config.clone(),
-                damage,
+                // damage,
                 render_buffer_fbo,
                 i,
             )?;
@@ -800,7 +801,7 @@ unsafe fn render_blur_pass_with_gl(
     config: Blur,
     // dst is the region that should have blur
     // it gets up/downscaled with passes
-    _damage: Rectangle<i32, Physical>,
+    // _damage: Rectangle<i32, Physical>,
     render_buffer_fbo: u32,
     i: usize,
 ) -> Result<(), GlesError> {

@@ -49,6 +49,7 @@ layer-rule{
         passes 1
         radius 4
         ignore-alpha 0.1 // 透明度剔除
+        blur-when-keyboard-focused true // 只在键盘聚焦时进行模糊
     }
 }
 ```

@@ -59,6 +59,7 @@ impl ResolvedLayerRules {
                 radius: None,
                 noise: None,
                 ignore_alpha: None,
+                blur_when_keyboard_focused: None,
             },
             geometry_corner_radius: None,
             place_within_backdrop: false,

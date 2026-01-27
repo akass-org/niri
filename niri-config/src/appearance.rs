@@ -319,6 +319,7 @@ pub struct Blur {
     pub radius: FloatOrInt<0, 1024>,
     pub noise: FloatOrInt<0, 1024>,
     pub ignore_alpha: FloatOrInt<0, 1>,
+    pub blur_when_keyboard_focused: bool,
 }
 
 impl Default for Blur {
@@ -330,6 +331,7 @@ impl Default for Blur {
             radius: FloatOrInt(0.0),
             noise: FloatOrInt(0.0),
             ignore_alpha: FloatOrInt(0.),
+            blur_when_keyboard_focused: false,
         }
     }
 }
@@ -341,7 +343,7 @@ impl MergeWith<BlurRule> for Blur {
             self.on = false;
         }
 
-        merge_clone!((self, part), passes, radius, noise, ignore_alpha);
+        merge_clone!((self, part), passes, radius, noise, ignore_alpha, blur_when_keyboard_focused);
     }
 }
 
@@ -700,6 +702,8 @@ pub struct BlurRule {
     pub noise: Option<FloatOrInt<0, 1024>>,
     #[knuffel(child, unwrap(argument))]
     pub ignore_alpha: Option<FloatOrInt<0, 1>>,
+    #[knuffel(child, unwrap(argument))]
+    pub blur_when_keyboard_focused: Option<bool>,
 }
 
 #[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq)]

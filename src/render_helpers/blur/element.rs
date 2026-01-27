@@ -6,7 +6,7 @@ use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
 use smithay::backend::renderer::gles::{GlesError, GlesFrame, GlesRenderer, GlesTexture, Uniform};
 use smithay::backend::renderer::utils::{CommitCounter, DamageSet, OpaqueRegions};
-use smithay::backend::renderer::Renderer;
+use smithay::backend::renderer::{Renderer, Texture};
 use smithay::output::Output;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 
