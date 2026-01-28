@@ -54,6 +54,27 @@ layer-rule{
 }
 ```
 
+**建议 blur 规则**
+
+```
+layer-rule{
+    match namespace="dms:spotlight"
+    blur {
+        blur-when-keyboard-focused true
+    }
+}
+
+layer-rule{
+    match namespace="selection" // slurp
+    match namespace="swww-daemon"
+    match namespace="linux-wallpaperengine"
+    match namespace="dms:control-center:background"
+    blur {
+        off
+    }
+}
+```
+
 ### ~~窗口捕获光标绘制~~（上游已实现）
 
 ~~窗口捕获时（应用不自行绘制光标的时候）可以绘制光标，不过目前无法通过 OBS 设置取消绘制。 参考 [Naxdy/niri@defae6a](https://github.com/Naxdy/niri/commit/defae6ad230e909657e3fcd5c46beeb926714652) 并修复 bug~~
