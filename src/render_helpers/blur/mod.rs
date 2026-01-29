@@ -443,7 +443,8 @@ pub(super) unsafe fn get_main_buffer_blur(
         let mut dst = dst;
         // let size =
         //     (2f32.powi(blur_config.passes as i32 + 1) * blur_config.radius.0 as f32).ceil() as i32;
-        let size= blur_config.radius.0 as i32;
+        // let size= blur_config.radius.0 as i32;
+        let size = blur_config.radius.0 as i32 * blur_config.passes as i32;
         dst.loc -= Point::from((size, size));
         dst.size += Size::from((size, size)).upscale(2);
         dst

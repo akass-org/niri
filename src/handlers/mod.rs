@@ -210,9 +210,26 @@ impl PointerConstraintsHandler for State {
         pointer.set_location(target);
 
         // Redraw to update the cursor position if it's visible.
+        // Only redraw outputs that the cursor is actually on, not all outputs.
         if self.niri.pointer_visibility.is_visible() {
-            // FIXME: redraw only outputs overlapping the cursor.
-            self.niri.queue_redraw_all();
+            let cursor_pos = pointer.current_location();
+            let outputs_to_redraw: Vec<_> = self
+                .niri
+                .global_space
+                .outputs()
+                .filter(|output| {
+                    if let Some(output_geo) = self.niri.global_space.output_geometry(output) {
+                        output_geo.to_f64().contains(cursor_pos)
+                    } else {
+                        false
+                    }
+                })
+                .cloned()
+                .collect();
+
+            for output in outputs_to_redraw {
+                self.niri.queue_redraw(&output);
+            }
         }
     }
 }
