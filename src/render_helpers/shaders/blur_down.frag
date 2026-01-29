@@ -17,17 +17,17 @@ uniform float scale;
 void main() {
     vec2 uv = niri_v_coords * scale;
 
-    // if (radius == 0.0) {
-    //     gl_FragColor = texture2D(tex, uv);
-    //     return;
-    // }
-    // vec2 offset = half_pixel * radius; 
-    // vec4 sum = texture2D(tex, uv) * 4.0
-    //     + texture2D(tex, uv + vec2(offset.x, 0.0))
-    //     + texture2D(tex, uv - vec2(offset.x, 0.0))
-    //     + texture2D(tex, uv + vec2(0.0, offset.y))
-    //     + texture2D(tex, uv - vec2(0.0, offset.y));
+    if (radius == 0.0) {
+        gl_FragColor = texture2D(tex, uv);
+        return;
+    }
+    vec2 offset = half_pixel * radius; 
+    vec4 sum = texture2D(tex, uv) * 4.0
+        + texture2D(tex, uv + vec2(offset.x, 0.0))
+        + texture2D(tex, uv - vec2(offset.x, 0.0))
+        + texture2D(tex, uv + vec2(0.0, offset.y))
+        + texture2D(tex, uv - vec2(0.0, offset.y));
 
-    // gl_FragColor = sum * 0.125;
-    gl_FragColor = texture2D(tex, uv);
+    gl_FragColor = sum * 0.125;
+    // gl_FragColor = texture2D(tex, uv);
 }
