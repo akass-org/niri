@@ -32,6 +32,7 @@ layout {
         on
         passes 1
         radius 4
+        noise 2.0 // 噪点
         ignore-alpha 0.1 // 透明度剔除
     }
 }
@@ -48,6 +49,7 @@ layer-rule{
         on
         passes 1
         radius 4
+        noise 2.0 // 噪点
         ignore-alpha 0.1 // 透明度剔除
         blur-when-keyboard-focused true // 只在键盘聚焦时进行模糊
     }
