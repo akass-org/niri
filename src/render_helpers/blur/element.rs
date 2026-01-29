@@ -280,7 +280,7 @@ fn draw_true_blur(
             ],
         ),
         // Uniform::new("alpha", alpha),
-        // Uniform::new("noise", config.noise.0 as f32),
+        Uniform::new("noise", config.noise.0 as f32),
         Uniform::new("corner_radius", corner_radius),
         // Uniform::new(
         //     "output_size",
@@ -362,7 +362,7 @@ impl RenderElement<GlesRenderer> for BlurRenderElement {
                                 ],
                             ),
                             Uniform::new("corner_radius", *corner_radius),
-                            // Uniform::new("noise", *noise),
+                            Uniform::new("noise", *noise),
                             // Uniform::new("alpha", self.alpha()),
                             Uniform::new("ignore_alpha", 0.),
                         ],

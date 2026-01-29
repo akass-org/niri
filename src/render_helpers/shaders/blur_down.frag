@@ -21,13 +21,14 @@ void main() {
         gl_FragColor = texture2D(tex, uv);
         return;
     }
-    vec2 offset = half_pixel * radius; 
-    vec4 sum = texture2D(tex, uv) * 4.0
-        + texture2D(tex, uv + vec2(offset.x, 0.0))
-        + texture2D(tex, uv - vec2(offset.x, 0.0))
-        + texture2D(tex, uv + vec2(0.0, offset.y))
-        + texture2D(tex, uv - vec2(0.0, offset.y));
+    // Kawase风格：对角线采样
+    vec2 offset = half_pixel * (radius * 0.707 + 0.5); // 调整到对角线
 
-    gl_FragColor = sum * 0.125;
+    vec4 sum = texture2D(tex, uv + vec2(-offset.x, -offset.y))
+            + texture2D(tex, uv + vec2( offset.x, -offset.y))
+            + texture2D(tex, uv + vec2(-offset.x,  offset.y))
+            + texture2D(tex, uv + vec2( offset.x,  offset.y));
+
+    gl_FragColor = sum * 0.25;
     // gl_FragColor = texture2D(tex, uv);
 }

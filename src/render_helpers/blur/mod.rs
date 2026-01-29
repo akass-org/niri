@@ -130,10 +130,10 @@ impl EffectsFramebuffers {
                 size.to_logical(1).to_buffer(1, Transform::Normal),
             )
         }
- 
+
         let mut sample_effects: Vec<GlesTexture> = Vec::new();
         let mut sample_fbos: Vec<u32> = Vec::new();
-        for i in 0..8 {
+        for i in 0..9 {
             let size = if i == 0 {
                 texture_size
             } else {
@@ -210,7 +210,7 @@ impl EffectsFramebuffers {
 
         let mut sample_effects: Vec<GlesTexture> = Vec::new();
         let mut sample_fbos: Vec<u32> = Vec::new();
-        for i in 0..8 {
+        for i in 0..9 {
             let size = if i == 0 {
                 texture_size
             } else {
@@ -441,10 +441,10 @@ pub(super) unsafe fn get_main_buffer_blur(
 
     let dst_expanded = {
         let mut dst = dst;
-        // let size =
-        //     (2f32.powi(blur_config.passes as i32 + 1) * blur_config.radius.0 as f32).ceil() as i32;
+        let p = blur_config.passes.saturating_sub(1);
+        let size = (1 << p) * blur_config.radius.0 as i32;
         // let size= blur_config.radius.0 as i32;
-        let size = blur_config.radius.0 as i32 * blur_config.passes as i32;
+        // let size = blur_config.radius.0 as i32 * blur_config.passes as i32;
         dst.loc -= Point::from((size, size));
         dst.size += Size::from((size, size)).upscale(2);
         dst
@@ -909,10 +909,7 @@ unsafe fn render_blur_pass_with_gl(
             if i == 0 { 0.0 } else { config.radius.0 as f32 },
         );
         gl.Uniform2f(program.uniform_half_pixel, half_pixel[0], half_pixel[1]);
-        gl.Uniform1f(
-            program.uniform_scale,
-            scale as f32,
-        );
+        gl.Uniform1f(program.uniform_scale, scale as f32);
 
         gl.EnableVertexAttribArray(program.attrib_vert as u32);
         gl.BindBuffer(ffi::ARRAY_BUFFER, vbos[0]);
