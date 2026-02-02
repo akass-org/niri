@@ -1,3 +1,4 @@
+use std::array;
 use std::sync::Arc;
 
 use niri_config::CornerRadius;
@@ -6,11 +7,15 @@ use smithay::utils::{Logical, Physical, Point, Rectangle, Scale};
 
 use crate::niri_render_elements;
 use crate::render_helpers::damage::ExtraDamage;
+use crate::render_helpers::framebuffer_effect::FramebufferEffectElement;
 use crate::render_helpers::xray::XrayElement;
-use crate::render_helpers::RenderCtx;
+use crate::render_helpers::{RenderCtx, RenderTarget};
 
 #[derive(Debug)]
 pub struct BackgroundEffect {
+    // Framebuffer effects are per-render-target because they store the framebuffer contents in a
+    // texture, and those differ per render target.
+    nonxray: [FramebufferEffectElement; RenderTarget::COUNT],
     /// Damage when options change.
     damage: ExtraDamage,
     options: Options,
@@ -153,6 +158,7 @@ impl EffectSubregion {
 
 niri_render_elements! {
     BackgroundEffectElement => {
+        FramebufferEffect = FramebufferEffectElement,
         Xray = XrayElement,
         ExtraDamage = ExtraDamage,
     }
@@ -161,8 +167,15 @@ niri_render_elements! {
 impl BackgroundEffect {
     pub fn new() -> Self {
         Self {
+            nonxray: array::from_fn(|_| FramebufferEffectElement::new()),
             damage: ExtraDamage::new(),
             options: Options::default(),
+        }
+    }
+
+    pub fn update_config(&mut self, config: niri_config::Blur) {
+        for elem in &mut self.nonxray {
+            elem.update_config(config);
         }
     }
 
@@ -224,6 +237,11 @@ impl BackgroundEffect {
             xray.render(ctx, self.options, params, &mut |elem| push(elem.into()));
         } else {
             // Render non-xray effect.
+            let elem = &self.nonxray[ctx.target as usize];
+            if let Some(elem) = elem.render(ctx.renderer, self.options, params) {
+                push(damage.into());
+                push(elem.into());
+            }
         }
     }
 }
