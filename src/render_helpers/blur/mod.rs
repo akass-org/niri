@@ -137,7 +137,7 @@ impl EffectsFramebuffers {
             let size = if i == 0 {
                 texture_size
             } else {
-                texture_size / (2 as i32).pow(i)
+                texture_size / (2 as i32).pow(i + 1)
             };
             let sample_effect = create_buffer(renderer, size).unwrap();
             sample_effects.push(sample_effect.clone());
@@ -214,7 +214,7 @@ impl EffectsFramebuffers {
             let size = if i == 0 {
                 texture_size
             } else {
-                texture_size / (2 as i32).pow(i)
+                texture_size / (2 as i32).pow(i + 1)
             };
             let sample_effect = create_buffer(renderer, size).unwrap();
             sample_effects.push(sample_effect.clone());
@@ -564,8 +564,8 @@ pub(super) unsafe fn get_main_buffer_blur(
                 projection_matrix,
                 sample_buffer,
                 render_buffer,
-                // if i == 0 {4.} else {2.},
-                2.,
+                if i == 0 { 4. } else { 2. },
+                // 2.,
                 &shaders.down,
                 half_pixel,
                 blur_config.clone(),
@@ -595,8 +595,8 @@ pub(super) unsafe fn get_main_buffer_blur(
                 projection_matrix,
                 sample_buffer,
                 render_buffer,
-                // if i == 0 {4.} else {2.},
-                2.,
+                if i == 0 { 4. } else { 2. },
+                // 2.,
                 &shaders.up,
                 half_pixel,
                 blur_config.clone(),
