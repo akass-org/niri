@@ -11,8 +11,8 @@
 ```
 window-rule {
     #match app-id="appid"
-    offscreen-render true #启用离屏渲染
-    offscreen-render-fps 120 #离屏渲染fps限制，不加则无限制
+    force-render true #启用离屏渲染
+    force-render-fps 120 #离屏渲染fps限制，不加则无限制
 }
 ```
 
