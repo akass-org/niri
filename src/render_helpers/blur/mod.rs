@@ -390,6 +390,28 @@ impl EffectsFramebuffers {
         )
     }
 
+    pub fn sample_buffers_at(
+        &mut self,
+        read_idx: usize,
+        write_idx: usize,
+    ) -> (&GlesTexture, &mut GlesTexture, u32) {
+        assert!(read_idx != write_idx);
+
+        let fbo = self.sample_fbos[write_idx];
+
+        if read_idx < write_idx {
+            let (left, right) = self.sample_effects.split_at_mut(write_idx);
+            let read = &left[read_idx];
+            let write = &mut right[0];
+            (read, write, fbo)
+        } else {
+            let (left, right) = self.sample_effects.split_at_mut(read_idx);
+            let write = &mut left[write_idx];
+            let read = &right[0];
+            (read, write, fbo)
+        }
+    }
+
     pub fn sample_fbo(&mut self, i: usize) -> u32 {
         *self.sample_fbos.get(i).unwrap()
     }
@@ -571,7 +593,7 @@ pub(super) unsafe fn get_main_buffer_blur(
                 blur_config.clone(),
                 // damage,
                 render_buffer_fbo,
-                i,
+                // i,
             )?;
             // fx_buffers.current_buffer.swap();
         }
@@ -580,11 +602,36 @@ pub(super) unsafe fn get_main_buffer_blur(
         //     0.5 / (tex_size.w as f32 * 2.0),
         //     0.5 / (tex_size.h as f32 * 2.0),
         // ];
-        for i in (0..passes).rev() {
-            // let (sample_buffer, render_buffer) = fx_buffers.buffers();
-            let (render_buffer, sample_buffer, render_buffer_fbo) =
-                fx_buffers.sample_buffers_rev(i);
-            // let damage = dst_expanded.downscale(1 << (passes - 1 - i));
+        // for i in (0..passes).rev() {
+        //     // let (sample_buffer, render_buffer) = fx_buffers.buffers();
+        //     let (render_buffer, sample_buffer, render_buffer_fbo) =
+        //         fx_buffers.sample_buffers_rev(i);
+        //     // let damage = dst_expanded.downscale(1 << (passes - 1 - i));
+        //     let tex_size_down = sample_buffer.size(); // 当前 FBO 尺寸
+        //     let half_pixel = [0.5 / tex_size_down.w as f32, 0.5 / tex_size_down.h as f32];
+        //     render_blur_pass_with_gl(
+        //         gl,
+        //         &vbos,
+        //         debug,
+        //         supports_instancing,
+        //         projection_matrix,
+        //         sample_buffer,
+        //         render_buffer,
+        //         if i == 0 { 4. } else { 2. },
+        //         // 2.,
+        //         &shaders.up,
+        //         half_pixel,
+        //         blur_config.clone(),
+        //         // damage,
+        //         render_buffer_fbo,
+        //         i,
+        //     )?;
+        //     // fx_buffers.current_buffer.swap();
+        // }
+        if passes > 0 {
+            let (sample_buffer, render_buffer, render_buffer_fbo) =
+                fx_buffers.sample_buffers_at(passes, 0);
+
             let tex_size_down = sample_buffer.size(); // 当前 FBO 尺寸
             let half_pixel = [0.5 / tex_size_down.w as f32, 0.5 / tex_size_down.h as f32];
             render_blur_pass_with_gl(
@@ -595,14 +642,14 @@ pub(super) unsafe fn get_main_buffer_blur(
                 projection_matrix,
                 sample_buffer,
                 render_buffer,
-                if i == 0 { 4. } else { 2. },
+                (4 * (2 as i32).pow(passes as u32 - 1)) as f64,
                 // 2.,
                 &shaders.up,
                 half_pixel,
                 blur_config.clone(),
                 // damage,
                 render_buffer_fbo,
-                i,
+                // i,
             )?;
             // fx_buffers.current_buffer.swap();
         }
@@ -804,12 +851,12 @@ unsafe fn render_blur_pass_with_gl(
     // it gets up/downscaled with passes
     // _damage: Rectangle<i32, Physical>,
     render_buffer_fbo: u32,
-    i: usize,
+    // i: usize,
 ) -> Result<(), GlesError> {
     let tex_size = sample_buffer.size();
     let src = Rectangle::from_size(tex_size.to_f64());
     let dest = src
-        .to_logical(1.0, Transform::Normal, &src.size)
+        .to_logical(1. / scale, Transform::Normal, &src.size)
         .to_physical(scale)
         .to_i32_round();
 
@@ -906,7 +953,8 @@ unsafe fn render_blur_pass_with_gl(
         // gl.Uniform1f(program.uniform_alpha, 1.0);
         gl.Uniform1f(
             program.uniform_radius,
-            if i == 0 { 0.0 } else { config.radius.0 as f32 },
+            // if i == 0 { 0.0 } else { config.radius.0 as f32 },
+            config.radius.0 as f32,
         );
         gl.Uniform2f(program.uniform_half_pixel, half_pixel[0], half_pixel[1]);
         gl.Uniform1f(program.uniform_scale, scale as f32);
