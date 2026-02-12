@@ -227,6 +227,7 @@ fn compile_resize_program(
             UniformName::new("niri_clamped_progress", UniformType::_1f),
             UniformName::new("niri_corner_radius", UniformType::_4f),
             UniformName::new("niri_clip_to_geometry", UniformType::_1f),
+            UniformName::new("exponent", UniformType::_1f),
         ],
         &["niri_tex_prev", "niri_tex_next"],
     )

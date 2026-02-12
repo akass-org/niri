@@ -1102,6 +1102,8 @@ impl<W: LayoutElement> Tile<W> {
             .unwrap_or_default()
             .scaled_by(1. - expanded_progress as f32);
 
+        let exponent = rules.rounding_exponent.unwrap_or(2.8);
+
         // Popups go on top, whether it's resize or not.
         self.window.render_popups(
             renderer,
@@ -1166,6 +1168,7 @@ impl<W: LayoutElement> Tile<W> {
                             radius,
                             clip_to_geometry,
                             win_alpha,
+                            exponent,
                         );
 
                         // We're drawing the resize shader, not the offscreen directly.
@@ -1192,8 +1195,6 @@ impl<W: LayoutElement> Tile<W> {
                 pushed_resize = true;
             }
         }
-
-        let exponent = rules.rounding_exponent.unwrap_or(2.8);
         // If we're not resizing, render the window itself.
         let has_border_shader = BorderRenderElement::has_shader(renderer);
         if !pushed_resize {

@@ -26,28 +26,33 @@ uniform float niri_clip_to_geometry;
 
 uniform float niri_alpha;
 uniform float niri_scale;
+uniform float exponent;
 
-float niri_rounding_alpha(vec2 coords, vec2 size) {
-    vec2 center;
-    float radius;
+float niri_rounding_alpha(vec2 p, vec2 s) {
+    // anti-alias
+    float aa = 0.5 / niri_scale;
 
-    if (coords.x < niri_corner_radius.x && coords.y < niri_corner_radius.x) {
-        radius = niri_corner_radius.x;
-        center = vec2(radius, radius);
-    } else if (size.x - niri_corner_radius.y < coords.x && coords.y < niri_corner_radius.y) {
-        radius = niri_corner_radius.y;
-        center = vec2(size.x - radius, radius);
-    } else if (size.x - niri_corner_radius.z < coords.x && size.y - niri_corner_radius.z < coords.y) {
-        radius = niri_corner_radius.z;
-        center = vec2(size.x - radius, size.y - radius);
-    } else if (coords.x < niri_corner_radius.w && size.y - niri_corner_radius.w < coords.y) {
-        radius = niri_corner_radius.w;
-        center = vec2(radius, size.y - radius);
-    } else {
-        return 1.0;
-    }
+    // 坐标中心化（相对于矩形中心）
+    vec2 offset = p - s * 0.5;
 
-    float dist = distance(coords, center);
-    float half_px = 0.5 / niri_scale;
-    return 1.0 - smoothstep(radius - half_px, radius + half_px, dist);
+    // 四角半径
+    float rx = mix(niri_corner_radius.x, niri_corner_radius.y, step(0.0, offset.x));
+    float ry = mix(niri_corner_radius.w, niri_corner_radius.z, step(0.0, offset.x));
+    float rad = mix(rx, ry, step(0.0, offset.y));
+
+    // 局部角落坐标
+    vec2 q = abs(offset) - (s * 0.5 - rad);
+
+    // ------------------------
+    // FG-squircle 核心公式
+    vec2 corner = max(q, 0.0);      // 角落部分
+    float dist = pow(pow(corner.x, exponent) + pow(corner.y, exponent), 1.0 / exponent) - rad;
+
+    // ------------------------
+    // 内部 alpha 修正：中心和边沿
+    float inside = min(max(q.x, q.y), 0.0); // q<0 时表示在矩形内部
+    dist += inside;
+
+    // 返回 alpha
+    return 1.0 - smoothstep(-aa, aa, dist);
 }
