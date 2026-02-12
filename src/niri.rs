@@ -570,7 +570,7 @@ struct SurfaceFrameThrottlingState {
     // last_time: RefCell<Duration>,
 }
 
-struct ForceRenderState {
+pub struct ForceRenderState {
     // To calculate time diff between current frame_callback_time and last render time.
     last_render_time: Duration,
     // To check if a force render frame is waiting to be rendered.
