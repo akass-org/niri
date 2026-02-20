@@ -21,9 +21,8 @@ use crate::animation::{Animation, Clock};
 use crate::input::swipe_tracker::SwipeTracker;
 use crate::layout::SizingMode;
 use crate::niri_render_elements;
-use crate::render_helpers::blur::EffectsFramebuffers;
 use crate::render_helpers::renderer::NiriRenderer;
-use crate::render_helpers::RenderTarget;
+use crate::render_helpers::RenderCtx;
 use crate::utils::transaction::{Transaction, TransactionBlocker};
 use crate::utils::ResizeEdge;
 use crate::window::ResolvedWindowRules;
@@ -31,8 +30,6 @@ use std::cell::RefCell;
 
 /// Amount of touchpad movement to scroll the view for the width of one working area.
 const VIEW_GESTURE_WORKING_AREA_MOVEMENT: f64 = 1200.;
-
-type EffectsFramebufffersUserData = Rc<RefCell<EffectsFramebuffers>>;
 
 /// A scrollable-tiling space for windows.
 #[derive(Debug)]
@@ -2914,11 +2911,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
     pub fn render<R: NiriRenderer>(
         &self,
-        renderer: &mut R,
-        target: RenderTarget,
+        mut ctx: RenderCtx<R>,
+        pos_in_backdrop: Point<f64, Logical>,
+        zoom: f64,
         focus_ring: bool,
-        fx_buffers: Option<EffectsFramebufffersUserData>,
-        overview_zoom: f64,
         push: &mut dyn FnMut(ScrollingSpaceRenderElement<R>),
     ) {
         let scale = Scale::from(self.scale);
@@ -2926,7 +2922,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         // Draw the closing windows on top of the other windows.
         let view_rect = Rectangle::new(Point::from((self.view_pos(), 0.)), self.view_size);
         for closing in self.closing_windows.iter().rev() {
-            let elem = closing.render(renderer.as_gles_renderer(), view_rect, scale, target);
+            let elem = closing.render(ctx.as_gles(), view_rect, scale);
             push(elem.into());
         }
 
@@ -2947,7 +2943,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 let pos = view_off + col_off + col_render_off;
                 let pos = pos.to_physical_precise_round(scale).to_logical(scale);
                 col.tab_indicator
-                    .render(renderer, pos, &mut |elem| push(elem.into()));
+                    .render(ctx.renderer, pos, &mut |elem| push(elem.into()));
             }
 
             for (tile, tile_off, visible) in col.tiles_in_render_order() {
@@ -2972,13 +2968,13 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                     continue;
                 }
 
+                let pos_in_backdrop = pos_in_backdrop + tile_pos.upscale(zoom);
                 tile.render(
-                    renderer,
+                    ctx.r(),
                     tile_pos,
+                    pos_in_backdrop,
+                    zoom,
                     focus_ring,
-                    target,
-                    fx_buffers.clone(),
-                    Some(overview_zoom),
                     &mut |elem| push(elem.into()),
                 );
             }

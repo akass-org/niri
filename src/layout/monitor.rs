@@ -21,11 +21,10 @@ use super::{compute_overview_zoom, ActivateWindow, HitType, LayoutElement, Optio
 use crate::animation::{Animation, Clock};
 use crate::input::swipe_tracker::SwipeTracker;
 use crate::niri_render_elements;
-use crate::render_helpers::blur::EffectsFramebuffers;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::shadow::ShadowRenderElement;
 use crate::render_helpers::solid_color::SolidColorRenderElement;
-use crate::render_helpers::RenderTarget;
+use crate::render_helpers::RenderCtx;
 use crate::rubber_band::RubberBand;
 use crate::utils::transaction::Transaction;
 use crate::utils::{
@@ -1673,8 +1672,7 @@ impl<W: LayoutElement> Monitor<W> {
 
     pub fn render_workspaces<R: NiriRenderer>(
         &self,
-        renderer: &mut R,
-        target: RenderTarget,
+        mut ctx: RenderCtx<R>,
         focus_ring: bool,
         push: &mut dyn FnMut(MonitorRenderElement<R>),
     ) {
@@ -1738,17 +1736,16 @@ impl<W: LayoutElement> Monitor<W> {
                 }};
             }
 
-            let fx_buffers = EffectsFramebuffers::get_user_data(&self.output);
-            ws.render_floating(renderer, target, focus_ring, fx_buffers, zoom, push!());
+            ws.render_floating(ctx.r(), geo.loc, zoom, focus_ring, push!());
 
             if let Some(loc) = insert_hint_render_loc {
                 if loc.workspace == InsertWorkspace::Existing(ws.id()) {
                     self.insert_hint_element
-                        .render(renderer, loc.location, push!());
+                        .render(ctx.renderer, loc.location, push!());
                 }
             }
 
-            ws.render_scrolling(renderer, target, focus_ring, self.overview_zoom(), push!());
+            ws.render_scrolling(ctx.r(), geo.loc, zoom, focus_ring, push!());
         }
     }
 

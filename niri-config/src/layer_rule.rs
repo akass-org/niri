@@ -1,4 +1,4 @@
-use crate::appearance::{BlockOutFrom, BlurRule, CornerRadius, ShadowRule};
+use crate::appearance::{BackgroundEffectRule, BlockOutFrom, CornerRadius, ShadowRule};
 use crate::utils::RegexEq;
 
 #[derive(knuffel::Decode, Debug, Default, Clone, PartialEq)]
@@ -14,8 +14,8 @@ pub struct LayerRule {
     pub block_out_from: Option<BlockOutFrom>,
     #[knuffel(child, default)]
     pub shadow: ShadowRule,
-    #[knuffel(child, default)]
-    pub blur: BlurRule,
+    // #[knuffel(child, default)]
+    // pub blur: BlurRule,
     #[knuffel(child)]
     pub geometry_corner_radius: Option<CornerRadius>,
     #[knuffel(child, unwrap(argument))]
@@ -26,6 +26,8 @@ pub struct LayerRule {
     pub transparent_block: Option<bool>,
     #[knuffel(child, unwrap(argument))]
     pub rounding_exponent: Option<f32>,
+    #[knuffel(child, default)]
+    pub background_effect: BackgroundEffectRule,
 }
 
 #[derive(knuffel::Decode, Debug, Default, Clone, PartialEq)]

@@ -18,9 +18,8 @@ use super::{
 };
 use crate::animation::{Animation, Clock};
 use crate::niri_render_elements;
-use crate::render_helpers::blur::EffectsFramebuffers;
 use crate::render_helpers::renderer::NiriRenderer;
-use crate::render_helpers::RenderTarget;
+use crate::render_helpers::RenderCtx;
 use crate::utils::transaction::TransactionBlocker;
 use crate::utils::{
     center_preferring_top_left_in_area, clamp_preferring_top_left_in_area, ensure_min_max_size,
@@ -31,8 +30,6 @@ use std::cell::RefCell;
 
 /// By how many logical pixels the directional move commands move floating windows.
 pub const DIRECTIONAL_MOVE_PX: f64 = 50.;
-
-type EffectsFramebufffersUserData = Rc<RefCell<EffectsFramebuffers>>;
 
 /// Space for floating windows.
 #[derive(Debug)]
@@ -1065,12 +1062,11 @@ impl<W: LayoutElement> FloatingSpace<W> {
 
     pub fn render<R: NiriRenderer>(
         &self,
-        renderer: &mut R,
+        mut ctx: RenderCtx<R>,
+        pos_in_backdrop: Point<f64, Logical>,
+        zoom: f64,
         view_rect: Rectangle<f64, Logical>,
-        target: RenderTarget,
         focus_ring: bool,
-        fx_buffers: Option<EffectsFramebufffersUserData>,
-        overview_zoom: f64,
         push: &mut dyn FnMut(FloatingSpaceRenderElement<R>),
     ) {
         let scale = Scale::from(self.scale);
@@ -1079,7 +1075,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         //
         // FIXME: I guess this should rather preserve the stacking order when the window is closed.
         for closing in self.closing_windows.iter().rev() {
-            let elem = closing.render(renderer.as_gles_renderer(), view_rect, scale, target);
+            let elem = closing.render(ctx.as_gles(), view_rect, scale);
             push(elem.into());
         }
 
@@ -1088,13 +1084,13 @@ impl<W: LayoutElement> FloatingSpace<W> {
             // For the active tile, draw the focus ring.
             let focus_ring = focus_ring && Some(tile.window().id()) == active.as_ref();
 
+            let pos_in_backdrop = pos_in_backdrop + tile_pos.upscale(zoom);
             tile.render(
-                renderer,
+                ctx.r(),
                 tile_pos,
+                pos_in_backdrop,
+                zoom,
                 focus_ring,
-                target,
-                fx_buffers.clone(),
-                Some(overview_zoom),
                 &mut |elem| push(elem.into()),
             );
         }

@@ -65,11 +65,10 @@ use super::{IpcOutputMap, RenderResult};
 use crate::backend::OutputId;
 use crate::frame_clock::FrameClock;
 use crate::niri::{Niri, RedrawState, State};
-use crate::render_helpers::blur::EffectsFramebuffers;
 use crate::render_helpers::debug::draw_damage;
 use crate::render_helpers::render_data::RendererData;
 use crate::render_helpers::renderer::AsGlesRenderer;
-use crate::render_helpers::{resources, shaders, RenderTarget};
+use crate::render_helpers::{resources, shaders, RenderCtx, RenderTarget};
 use crate::utils::{get_monotonic_time, is_laptop_panel, logical_output, PanelOrientation};
 
 const SUPPORTED_COLOR_FORMATS: [Fourcc; 4] = [
@@ -1353,7 +1352,6 @@ impl Tty {
 
         let render_node = device.render_node.unwrap_or(self.primary_render_node);
         let mut renderer = self.gpu_manager.single_renderer(&render_node)?;
-        EffectsFramebuffers::init_for_output(output.clone(), renderer.as_mut(), None);
         let egl_context = renderer.as_ref().egl_context();
         let render_formats = egl_context.dmabuf_render_formats();
 
@@ -1843,8 +1841,12 @@ impl Tty {
         };
 
         // Render the elements.
-        let mut elements =
-            niri.render::<TtyRenderer>(&mut renderer, output, true, RenderTarget::Output);
+        let ctx = RenderCtx {
+            renderer: &mut renderer,
+            target: RenderTarget::Output,
+            xray: None,
+        };
+        let mut elements = niri.render_to_vec(ctx, output, true);
 
         // Visualize the damage, if enabled.
         if niri.debug_draw_damage {

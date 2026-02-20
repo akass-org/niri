@@ -1,13 +1,14 @@
 use std::cell::{Cell, Ref, RefCell};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::niri::OutputRenderElements;
-use niri_config::{Blur, Color, Config, CornerRadius, GradientInterpolation, WindowRule};
-use smithay::backend::renderer::element::surface::render_elements_from_surface_tree;
+use niri_config::{Color, Config, CornerRadius, GradientInterpolation, WindowRule};
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::RelocateRenderElement;
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::GlesRenderer;
+use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
 use smithay::desktop::space::SpaceElement as _;
 use smithay::desktop::{PopupManager, Window};
 use smithay::output::{self, Output};
@@ -25,15 +26,13 @@ use smithay::wayland::shell::xdg::{
 use wayland_backend::server::Credentials;
 
 use super::{ResolvedWindowRules, WindowRef};
+use crate::handlers::background_effect::get_cached_blur_region;
 use crate::handlers::KdeDecorationsModeState;
-use crate::layer::mapped::LayerSurfaceRenderElement;
 use crate::layout::{
     ConfigureIntent, InteractiveResizeData, LayoutElement, LayoutElementRenderElement,
     LayoutElementRenderSnapshot, SizingMode,
 };
 use crate::niri_render_elements;
-use crate::render_helpers::blur::element::BlurRenderElement;
-use crate::render_helpers::blur::EffectsFramebuffers;
 use crate::render_helpers::border::BorderRenderElement;
 use crate::render_helpers::offscreen::OffscreenData;
 use crate::render_helpers::renderer::NiriRenderer;
@@ -42,7 +41,7 @@ use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderEleme
 use crate::render_helpers::surface::{
     push_elements_from_surface_tree, render_snapshot_from_surface_tree,
 };
-use crate::render_helpers::{render_to_texture, BakedBuffer, RenderTarget};
+use crate::render_helpers::{BakedBuffer, RenderCtx, RenderTarget};
 use crate::utils::id::IdCounter;
 use crate::utils::transaction::Transaction;
 use crate::utils::{
@@ -50,10 +49,6 @@ use crate::utils::{
     with_toplevel_last_uncommitted_configure, with_toplevel_role, with_toplevel_role_and_current,
     ResizeEdge,
 };
-use niri_config::utils::MergeWith;
-use smithay::backend::allocator::Fourcc;
-use std::rc::Rc;
-type EffectsFramebufffersUserData = Rc<RefCell<EffectsFramebuffers>>;
 
 #[derive(Debug)]
 pub struct Mapped {
@@ -198,8 +193,6 @@ pub struct Mapped {
 
     /// Most recent monotonic time when the window had the focus.
     focus_timestamp: Option<Duration>,
-
-    blur_config: Blur,
 }
 
 niri_render_elements! {
@@ -266,12 +259,6 @@ impl Mapped {
         let surface = window.wl_surface().expect("no X11 support");
         let credentials = get_credentials_for_surface(&surface);
 
-        let mut blur_config = config.layout.blur;
-        // blur_config.on = false;
-        blur_config.merge_with(&rules.blur);
-
-        // debug!("init blur config {:?} - {:?}", blur_config, &rules.blur);
-
         let mut rv = Self {
             window,
             id: MappedId::next(),
@@ -304,7 +291,6 @@ impl Mapped {
             is_pending_maximized: false,
             uncommitted_maximized: Vec::new(),
             focus_timestamp: None,
-            blur_config,
         };
 
         rv.is_maximized = rv.sizing_mode().is_maximized();
@@ -427,10 +413,12 @@ impl Mapped {
 
         RenderSnapshot {
             contents,
+            contents_with_blocked_out_bg: None,
             blocked_out_contents,
             block_out_from: self.rules().block_out_from,
             size,
             texture: Default::default(),
+            texture_with_blocked_out_bg: Default::default(),
             blocked_out_texture: Default::default(),
         }
     }
@@ -542,12 +530,14 @@ impl Mapped {
         };
 
         self.render(
-            renderer,
+            RenderCtx {
+                renderer,
+                target: RenderTarget::Screencast,
+                xray: None,
+            },
             location,
             scale,
             1.,
-            RenderTarget::Screencast,
-            None,
             &mut |elem| push(use_border(elem)),
         );
     }
@@ -636,17 +626,14 @@ impl LayoutElement for Mapped {
 
     fn render_normal<R: NiriRenderer>(
         &self,
-        renderer: &mut R,
+        ctx: RenderCtx<R>,
         location: Point<f64, Logical>,
         scale: Scale<f64>,
         alpha: f32,
-        target: RenderTarget,
         push: &mut dyn FnMut(LayoutElementRenderElement<R>),
     ) {
-        if target.should_block_out(self.rules.block_out_from) {
-            if let Some(true) = self.rules.transparent_block {
-                // vec![]
-            } else {
+        if ctx.target.should_block_out(self.rules.block_out_from) {
+            if let Some(false) = self.rules.transparent_block {
                 let mut buffer = self.block_out_buffer.borrow_mut();
                 buffer.resize(self.window.geometry().size.to_f64());
                 let elem = SolidColorRenderElement::from_buffer(
@@ -662,7 +649,7 @@ impl LayoutElement for Mapped {
             let surface = self.toplevel().wl_surface();
             let mut push = |elem: WaylandSurfaceRenderElement<R>| push(elem.into());
             push_elements_from_surface_tree(
-                renderer,
+                ctx.renderer,
                 surface,
                 buf_pos.to_physical_precise_round(scale),
                 scale,
@@ -675,95 +662,31 @@ impl LayoutElement for Mapped {
 
     fn render_popups<R: NiriRenderer>(
         &self,
-        renderer: &mut R,
+        ctx: RenderCtx<R>,
         location: Point<f64, Logical>,
         scale: Scale<f64>,
         alpha: f32,
-        target: RenderTarget,
-        fx_buffers: Option<EffectsFramebufffersUserData>,
         push: &mut dyn FnMut(LayoutElementRenderElement<R>),
     ) {
-        if target.should_block_out(self.rules.block_out_from) {
+        if ctx.target.should_block_out(self.rules.block_out_from) {
             return;
         }
 
         let buf_pos = location - self.window.geometry().loc.to_f64();
         let surface = self.toplevel().wl_surface();
-        // let mut push_mut = |elem: WaylandSurfaceRenderElement<R>| push(elem.into());
+        let mut push = |elem: WaylandSurfaceRenderElement<R>| push(elem.into());
         for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
             let offset = self.window.geometry().loc + popup_offset - popup.geometry().loc;
 
-            let size = popup.geometry().size.to_f64();
-
-            let mut gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> = None;
-
-            {
-                let mut push_mut = |elem: WaylandSurfaceRenderElement<R>| push(elem.into());
-                push_elements_from_surface_tree(
-                    renderer,
-                    popup.wl_surface(),
-                    (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
-                    scale,
-                    alpha,
-                    Kind::ScanoutCandidate,
-                    &mut push_mut,
-                );
-            }
-
-            gles_elems = Some(render_elements_from_surface_tree(
-                renderer.as_gles_renderer(),
+            push_elements_from_surface_tree(
+                ctx.renderer,
                 popup.wl_surface(),
                 (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
                 scale,
                 alpha,
                 Kind::ScanoutCandidate,
-            ));
-
-            if self.blur_config.on {
-                if let Some(fx_buffers_rc) = fx_buffers.as_ref() {
-                    let fx_buffers = fx_buffers_rc.borrow();
-                    let alpha_tex = gles_elems
-                        .and_then(|gles_elems| {
-                            let transform = fx_buffers.transform();
-
-                            render_to_texture(
-                                renderer.as_gles_renderer(),
-                                transform.transform_size(fx_buffers.output_size()),
-                                scale,
-                                Transform::Normal,
-                                Fourcc::Abgr8888,
-                                gles_elems.into_iter(),
-                            )
-                            .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
-                            .ok()
-                        })
-                        .map(|r| r.0);
-
-                    // let radius = self.rules.geometry_corner_radius.unwrap_or_default();
-
-                    let blur_sample_area =
-                        Rectangle::new(buf_pos + offset.to_f64(), size).to_i32_round();
-
-                    let blur_elem = BlurRenderElement::new(
-                        renderer,
-                        fx_buffers_rc.clone(),
-                        blur_sample_area,
-                        (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
-                        self.rules
-                            .geometry_corner_radius
-                            .unwrap_or_default()
-                            .top_left,
-                        false,
-                        scale.x,
-                        self.blur_config,
-                        1.,
-                        alpha_tex,
-                    )
-                    .into();
-
-                    push(blur_elem);
-                }
-            }
+                &mut push,
+            );
         }
     }
 
@@ -1393,6 +1316,30 @@ impl LayoutElement for Mapped {
 
     fn interactive_resize_data(&self) -> Option<InteractiveResizeData> {
         Some(self.interactive_resize.as_ref()?.data())
+    }
+
+    fn main_surface_geo(&self) -> Rectangle<i32, Logical> {
+        with_states(self.toplevel().wl_surface(), |states| {
+            let geo_loc = states
+                .cached_state
+                .get::<SurfaceCachedState>()
+                .current()
+                .geometry
+                .unwrap_or_default()
+                .loc;
+
+            let data = states.data_map.get::<RendererSurfaceStateUserData>();
+            data.and_then(|d| d.lock().unwrap().view())
+                .map(|view| Rectangle {
+                    loc: view.offset - geo_loc,
+                    size: view.dst,
+                })
+        })
+        .unwrap_or_default()
+    }
+
+    fn blur_region(&self) -> Option<Arc<Vec<Rectangle<i32, Logical>>>> {
+        with_states(self.toplevel().wl_surface(), get_cached_blur_region)
     }
 
     fn on_commit(&mut self, commit_serial: Serial) {

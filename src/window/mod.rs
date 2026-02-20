@@ -3,8 +3,8 @@ use std::cmp::{max, min};
 use niri_config::utils::MergeWith as _;
 use niri_config::window_rule::{Match, WindowRule};
 use niri_config::{
-    BlockOutFrom, BlurRule, BorderRule, CornerRadius, FloatingPosition, PresetSize, ShadowRule,
-    TabIndicatorRule,
+    BackgroundEffect, BlockOutFrom, BorderRule, CornerRadius, FloatingPosition, PresetSize,
+    ShadowRule, TabIndicatorRule,
 };
 use niri_ipc::ColumnDisplay;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
@@ -88,8 +88,6 @@ pub struct ResolvedWindowRules {
     pub border: BorderRule,
     /// Shadow overrides.
     pub shadow: ShadowRule,
-    /// Blur overrides.
-    pub blur: BlurRule,
     /// Tab indicator overrides.
     pub tab_indicator: TabIndicatorRule,
 
@@ -133,6 +131,8 @@ pub struct ResolvedWindowRules {
     pub force_render_fps: Option<u16>,
 
     pub rounding_exponent: Option<f32>,
+    /// Background effect configuration.
+    pub background_effect: BackgroundEffect,
 }
 
 impl<'a> WindowRef<'a> {
@@ -281,7 +281,6 @@ impl ResolvedWindowRules {
                 resolved.focus_ring.merge_with(&rule.focus_ring);
                 resolved.border.merge_with(&rule.border);
                 resolved.shadow.merge_with(&rule.shadow);
-                resolved.blur.merge_with(&rule.blur);
                 resolved.tab_indicator.merge_with(&rule.tab_indicator);
 
                 if let Some(x) = rule.draw_border_with_background {
@@ -330,6 +329,9 @@ impl ResolvedWindowRules {
                 if let Some(x) = rule.rounding_exponent {
                     resolved.rounding_exponent = Some(x);
                 }
+                resolved
+                    .background_effect
+                    .merge_with(&rule.background_effect);
             }
 
             resolved.open_on_output = open_on_output.map(|x| x.to_owned());

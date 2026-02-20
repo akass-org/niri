@@ -27,7 +27,6 @@ pub struct Layout {
     pub gaps: f64,
     pub struts: Struts,
     pub background_color: Color,
-    pub blur: Blur,
     pub background_in_working_area_only: bool,
     pub fullscreen_backdrop_color: Color,
 }
@@ -58,7 +57,6 @@ impl Default for Layout {
                 PresetSize::Proportion(2. / 3.),
             ],
             background_color: DEFAULT_BACKGROUND_COLOR,
-            blur: Default::default(),
             background_in_working_area_only: false,
             fullscreen_backdrop_color: DEFAULT_BACKDROP_COLOR,
         }
@@ -78,7 +76,6 @@ impl MergeWith<LayoutPart> for Layout {
             empty_workspace_above_first,
             background_in_working_area_only,
             gaps,
-            blur,
         );
 
         merge_clone!(

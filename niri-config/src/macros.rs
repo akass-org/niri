@@ -28,28 +28,6 @@ macro_rules! merge_clone_opt {
     };
 }
 
-// macro_rules! merge_clone_opt_ext {
-//     (($self:expr, $part:expr), $($field:ident),+ $(,)*) => {
-//         $(
-//             // if $part.$field {
-//             //     $self.$field.clone_from(&$part.$field);
-//             // }
-//             $self.$field = Some($part.$field);
-//         )+
-//     };
-// }
-
-// macro_rules! merge_clone_opt_foi {
-//     (($self:expr, $part:expr), $($field:ident),+ $(,)*) => {
-//         $(
-//             // if $part.$field {
-//             //     $self.$field.clone_from(&$part.$field);
-//             // }
-//             $self.$field = Some(FloatOrInt($part.$field));
-//         )+
-//     };
-// }
-
 macro_rules! merge_color_gradient {
     (($self:expr, $part:expr), $(($color:ident, $gradient:ident)),+ $(,)*) => {
         $(

@@ -7,6 +7,7 @@ uniform float niri_tint;
 uniform float niri_alpha;
 uniform float niri_scale;
 
+uniform vec2 niri_size;
 varying vec2 niri_v_coords;
 
 uniform vec4 shadow_color;
@@ -19,100 +20,93 @@ uniform vec4 corner_radius;
 uniform mat3 window_input_to_geo;
 uniform vec2 window_geo_size;
 uniform vec4 window_corner_radius;
-uniform float exponent;
 
-/* ================= math ================= */
+// Based on: https://madebyevan.com/shaders/fast-rounded-rectangle-shadows/
+//
+// License: CC0 (http://creativecommons.org/publicdomain/zero/1.0/)
 
-float erf_approx(float x) {
-    float s = sign(x);
-    x = abs(x);
-    float t = 1.0 + (0.278393 + (0.230389 + 0.078108 * x * x) * x) * x;
-    t *= t;
-    return s - s / (t * t);
+// A standard gaussian function, used for weighting samples
+float gaussian(float x, float sigma) {
+    const float pi = 3.141592653589793;
+    return exp(-(x * x) / (2.0 * sigma * sigma)) / (sqrt(2.0 * pi) * sigma);
 }
 
-/* ================= SDF rounded rect ================= */
-
-float sdRoundRect(vec2 p, vec2 size, vec4 r) {
-    vec2 h = size * 0.5;
-    vec2 offset = p - h;
-
-    // 四角半径选择（与你最早的版本完全一致）
-    float rx = mix(r.x, r.y, step(0.0, offset.x));
-    float ry = mix(r.w, r.z, step(0.0, offset.x));
-    float rad = mix(rx, ry, step(0.0, offset.y));
-
-    // 局部角坐标
-    vec2 q = abs(offset) - (h - rad);
-
-    // -------- 超椭圆（FG-squircle）--------
-    vec2 corner = max(q, 0.0);
-
-    float dist =
-        pow(
-            pow(corner.x, exponent) +
-            pow(corner.y, exponent),
-            1.0 / exponent
-        ) - rad;
-
-    // inside 修正（保持 signed distance 语义）
-    dist += min(max(q.x, q.y), 0.0);
-
-    return dist;
+// This approximates the error function, needed for the gaussian integral
+vec2 erf(vec2 x) {
+    vec2 s = sign(x), a = abs(x);
+    x = 1.0 + (0.278393 + (0.230389 + 0.078108 * (a * a)) * a) * a;
+    x *= x;
+    return s - s / (x * x);
 }
 
-/* ================= coverage ================= */
-
-float rounding_alpha(vec2 p, vec2 size, vec4 r) {
-    float aa = 0.5 / niri_scale;
-    float d = sdRoundRect(p, size, r);
-    return 1.0 - smoothstep(-aa, aa, d);
+// Return the blurred mask along the x dimension
+float roundedBoxShadowX(float x, float y, float sigma, float corner, vec2 halfSize) {
+    float delta = min(halfSize.y - corner - abs(y), 0.0);
+    float curved = halfSize.x - corner + sqrt(max(0.0, corner * corner - delta * delta));
+    vec2 integral = 0.5 + 0.5 * erf((x + vec2(-curved, curved)) * (sqrt(0.5) / sigma));
+    return integral.y - integral.x;
 }
 
-/* ================= shadow (CORRECT MODEL) ================= */
-/* coverage blur == Gaussian CDF */
+// Return the mask for the shadow of a box from lower to upper
+float roundedBoxShadow(vec2 lower, vec2 upper, vec2 point, float sigma, float corner) {
+  // Center everything to make the math easier
+    vec2 center = (lower + upper) * 0.5;
+    vec2 halfSize = (upper - lower) * 0.5;
+    point -= center;
 
-float shadow_alpha(vec2 p, vec2 size, vec4 r, float sigma) {
-    float d = sdRoundRect(p, size, r);
-    float s = max(sigma, 1e-4);
-    return 0.5 * (1.0 - erf_approx(d / (sqrt(2.0) * s)));
+  // The signal is only non-zero in a limited range, so don't waste samples
+    float low = point.y - halfSize.y;
+    float high = point.y + halfSize.y;
+    float start = clamp(-3.0 * sigma, low, high);
+    float end = clamp(3.0 * sigma, low, high);
+
+  // Accumulate samples (we can get away with surprisingly few samples)
+    float step = (end - start) / 4.0;
+    float y = start + step * 0.5;
+    float value = 0.0;
+    for(int i = 0; i < 4; i++) {
+        value += roundedBoxShadowX(point.x, point.y - y, sigma, corner, halfSize) * gaussian(y, sigma) * step;
+        y += step;
+    }
+
+    return value;
 }
+
+float niri_rounding_alpha(vec2 coords, vec2 size, vec4 corner_radius);
 
 void main() {
-    vec2 geo = (input_to_geo * vec3(niri_v_coords, 1.0)).xy;
-    vec2 win = (window_input_to_geo * vec3(niri_v_coords, 1.0)).xy;
+    vec3 coords_geo = input_to_geo * vec3(niri_v_coords, 1.0);
+    vec3 coords_window_geo = window_input_to_geo * vec3(niri_v_coords, 1.0);
 
     vec4 color = shadow_color;
 
-    /* ===== solid vs blur ===== */
+    float shadow_value;
+    if(sigma < 0.1) {
+        // With low enough sigma just draw a rounded rectangle.
+        shadow_value = niri_rounding_alpha(coords_geo.xy, geo_size, corner_radius);
+    } else {
+        shadow_value = roundedBoxShadow(vec2(0.0, 0.0), geo_size, coords_geo.xy, sigma,
+            // FIXME: figure out how to blur with different corner radii.
+            //
+            // GTK seems to call blurring separately for the rect and for the 4 corners:
+            // https://gitlab.gnome.org/GNOME/gtk/-/blob/gtk-4-16/gsk/gpu/shaders/gskgpuboxshadow.glsl
+        corner_radius.x);
+    }
+    color = color * shadow_value;
 
-    float solid = rounding_alpha(geo, geo_size, corner_radius);
-    float blur  = shadow_alpha(geo, geo_size, corner_radius, sigma);
+    // Cut out the inside of the window geometry if requested.
+    if(window_geo_size != vec2(0.0, 0.0)) {
+        if(0.0 <= coords_window_geo.x && coords_window_geo.x <= window_geo_size.x && 0.0 <= coords_window_geo.y && coords_window_geo.y <= window_geo_size.y) {
+            float alpha = niri_rounding_alpha(coords_window_geo.xy, window_geo_size, window_corner_radius);
+            color = color * (1.0 - alpha);
+        }
+    }
 
-    float use_blur = step(0.1, sigma);
-    float shadow = mix(solid, blur, use_blur);
-
-    color *= shadow;
-
-    /* ===== window cutout (coverage-correct) ===== */
-
-    float win_inside =
-        step(0.0, win.x) *
-        step(0.0, win.y) *
-        step(win.x, window_geo_size.x) *
-        step(win.y, window_geo_size.y);
-
-    float win_cov = rounding_alpha(win, window_geo_size, window_corner_radius);
-
-    color *= (1.0 - win_inside * win_cov);
-
-    /* ===== final ===== */
-
-    color *= niri_alpha;
+    color = color * niri_alpha;
 
 #if defined(DEBUG_FLAGS)
-    float dbg = step(0.5, niri_tint);
-    color = mix(color, vec4(0.0, 0.2, 0.0, 0.2) + color * 0.8, dbg);
+    if(niri_tint == 1.0)
+        color = vec4(0.0, 0.2, 0.0, 0.2) + color * 0.8;
 #endif
 
     gl_FragColor = color;

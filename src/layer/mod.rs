@@ -1,6 +1,6 @@
 use niri_config::layer_rule::{LayerRule, Match};
 use niri_config::utils::MergeWith as _;
-use niri_config::{BlockOutFrom, BlurRule, CornerRadius, FloatOrInt, ShadowRule};
+use niri_config::{BackgroundEffect, BlockOutFrom, CornerRadius, ShadowRule};
 use smithay::desktop::LayerSurface;
 
 pub mod mapped;
@@ -21,9 +21,6 @@ pub struct ResolvedLayerRules {
     /// Shadow overrides.
     pub shadow: ShadowRule,
 
-    /// Blur overrides.
-    pub blur: BlurRule,
-
     /// Corner radius to assume this layer surface has.
     pub geometry_corner_radius: Option<CornerRadius>,
 
@@ -34,6 +31,8 @@ pub struct ResolvedLayerRules {
     pub baba_is_float: bool,
 
     pub exponent: Option<f32>,
+    /// Background effect configuration.
+    pub background_effect: BackgroundEffect,
 }
 
 impl ResolvedLayerRules {
@@ -84,7 +83,10 @@ impl ResolvedLayerRules {
             }
 
             resolved.shadow.merge_with(&rule.shadow);
-            resolved.blur.merge_with(&rule.blur);
+
+            resolved
+                .background_effect
+                .merge_with(&rule.background_effect);
         }
 
         resolved
