@@ -85,10 +85,14 @@ impl FramebufferEffect {
         {
             let mut inner = element.inner.borrow_mut();
 
-            let inner = if let Some(inner) = &*inner {
+            let inner = if let Some(inner) = &mut *inner {
+                if let Some(blur) = &mut inner.blur {
+                    blur.update_alpha_tex(params.alpha_tex);
+                }
                 inner
             } else {
-                let blur = Blur::new(renderer);
+                debug!("init blur for framebuffer effect");
+                let blur = Blur::new(renderer, params.alpha_tex);
                 inner.insert(Inner::new(renderer, blur))
             };
 

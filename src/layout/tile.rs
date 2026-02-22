@@ -1383,6 +1383,7 @@ impl<W: LayoutElement> Tile<W> {
                     pos_in_backdrop,
                     zoom,
                     scale: self.scale,
+                    alpha_tex: None,
                 };
                 self.background_effect
                     .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));

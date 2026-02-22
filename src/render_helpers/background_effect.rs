@@ -2,7 +2,7 @@ use std::array;
 use std::sync::Arc;
 
 use niri_config::CornerRadius;
-use smithay::backend::renderer::gles::GlesRenderer;
+use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
 use smithay::utils::{Logical, Physical, Point, Rectangle, Scale};
 
 use crate::niri_render_elements;
@@ -62,6 +62,8 @@ pub struct RenderParams {
     pub zoom: f64,
     /// Scale to use for rounding to physical pixels.
     pub scale: f64,
+
+    pub alpha_tex: Option<GlesTexture>,
 }
 
 impl RenderParams {

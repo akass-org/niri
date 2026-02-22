@@ -360,3 +360,83 @@ fn render_elements(
 
     frame.finish().context("error finishing frame")
 }
+
+pub fn render_to_texture_with_offset(
+    renderer: &mut GlesRenderer,
+    size: Size<i32, Physical>,
+    scale: Scale<f64>,
+    transform: Transform,
+    fourcc: Fourcc,
+    elements: impl Iterator<Item = impl RenderElement<GlesRenderer>>,
+    offset: Point<i32, Physical>,
+) -> anyhow::Result<(GlesTexture, SyncPoint)> {
+    let _span = tracy_client::span!();
+
+    let buffer_size = size.to_logical(1).to_buffer(1, Transform::Normal);
+
+    let mut texture: GlesTexture = renderer
+        .create_buffer(fourcc, buffer_size)
+        .context("error creating texture")?;
+
+    let sync_point = {
+        let mut target = renderer
+            .bind(&mut texture)
+            .context("error binding texture")?;
+
+        render_elements_with_offset(
+            renderer,
+            &mut target,
+            size,
+            scale,
+            transform,
+            elements,
+            offset,
+        )?
+    };
+
+    Ok((texture, sync_point))
+}
+
+fn render_elements_with_offset(
+    renderer: &mut GlesRenderer,
+    target: &mut GlesTarget,
+    size: Size<i32, Physical>,
+    scale: Scale<f64>,
+    transform: Transform,
+    elements: impl Iterator<Item = impl RenderElement<GlesRenderer>>,
+    offset: Point<i32, Physical>,
+) -> anyhow::Result<SyncPoint> {
+    let transform = transform.invert();
+    let output_rect = Rectangle::from_size(transform.transform_size(size));
+
+    let mut frame = renderer
+        .render(target, size, transform)
+        .context("error starting frame")?;
+
+    frame
+        .clear(Color32F::TRANSPARENT, &[output_rect])
+        .context("error clearing")?;
+
+    for element in elements {
+        let src = element.src();
+        let mut dst = element.geometry(scale);
+        dst.loc -= offset;
+
+        // debug!("output_rect {output_rect:?} and dst {dst:?}");
+
+        if let Some(mut damage) = output_rect.intersection(dst) {
+            damage.loc -= dst.loc;
+            // debug!("rendering element with dst {dst:?} and damage {damage:?}");
+            if element.is_framebuffer_effect() {
+                element
+                    .capture_framebuffer(&mut frame, src, dst)
+                    .context("error in capture_framebuffer()")?;
+            }
+            element
+                .draw(&mut frame, src, dst, &[damage], &[])
+                .context("error drawing element")?;
+        }
+    }
+
+    frame.finish().context("error finishing frame")
+}

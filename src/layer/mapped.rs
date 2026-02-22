@@ -2,11 +2,13 @@ use std::sync::Arc;
 
 use niri_config::utils::MergeWith as _;
 use niri_config::{Config, CornerRadius, LayerRule};
-use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
+use smithay::backend::renderer::element::surface::{
+    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
+};
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
 use smithay::desktop::{LayerSurface, PopupManager};
-use smithay::utils::{Logical, Point, Rectangle, Scale, Size};
+use smithay::utils::{Logical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::wlr_layer::{ExclusiveZone, Layer};
 
@@ -20,8 +22,12 @@ use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::shadow::ShadowRenderElement;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::surface::push_elements_from_surface_tree;
-use crate::render_helpers::{background_effect, RenderCtx};
+use crate::render_helpers::{
+    background_effect, render_to_texture, render_to_texture_with_offset, RenderCtx,
+};
 use crate::utils::{baba_is_float_offset, round_logical_in_physical};
+use smithay::backend::allocator::Fourcc;
+use smithay::backend::renderer::gles::GlesRenderer;
 
 #[derive(Debug)]
 pub struct MappedLayer {
@@ -264,6 +270,35 @@ impl MappedLayer {
             };
 
             if let Some(geometry) = blur_geometry {
+                let gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> =
+                    Some(render_elements_from_surface_tree(
+                        ctx.renderer.as_gles_renderer(),
+                        self.surface.wl_surface(),
+                        location.to_physical_precise_round(scale),
+                        scale,
+                        alpha,
+                        Kind::ScanoutCandidate,
+                    ));
+
+                // TODO: respect sync point?
+                let alpha_tex = gles_elems
+                    .and_then(|gles_elems| {
+                        render_to_texture_with_offset(
+                            ctx.renderer.as_gles_renderer(),
+                            self.main_surface_geo()
+                                .size
+                                .to_physical_precise_round(scale),
+                            self.scale.into(),
+                            Transform::Normal,
+                            Fourcc::Abgr8888,
+                            gles_elems.into_iter(),
+                            geometry.loc.to_physical_precise_round(self.scale),
+                        )
+                        .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
+                        .ok()
+                    })
+                    .map(|r| r.0);
+
                 pos_in_backdrop += (geometry.loc - area.loc).upscale(zoom);
                 let params = background_effect::RenderParams {
                     geometry,
@@ -272,6 +307,7 @@ impl MappedLayer {
                     pos_in_backdrop,
                     zoom,
                     scale: self.scale,
+                    alpha_tex,
                 };
                 self.background_effect
                     .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));

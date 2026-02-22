@@ -22,6 +22,8 @@ pub struct Blur {
     ///
     /// Created lazily and stored here to avoid recreating blur textures frequently.
     textures: Vec<GlesTexture>,
+
+    alpha_tex: Option<GlesTexture>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -46,6 +48,7 @@ pub struct BlurProgram(Rc<BlurProgramInner>);
 struct BlurProgramInner {
     down: BlurProgramInternal,
     up: BlurProgramInternal,
+    finish: BlurFinish,
 }
 
 #[derive(Debug)]
@@ -54,6 +57,16 @@ struct BlurProgramInternal {
     uniform_tex: ffi::types::GLint,
     uniform_half_pixel: ffi::types::GLint,
     uniform_offset: ffi::types::GLint,
+    attrib_vert: ffi::types::GLint,
+}
+
+#[derive(Debug)]
+struct BlurFinish {
+    program: ffi::types::GLuint,
+    uniform_tex: ffi::types::GLint,
+    uniform_alpha_tex: ffi::types::GLint,
+    uniform_ignore_alpha: ffi::types::GLint,
+    uniform_geo: ffi::types::GLint,
     attrib_vert: ffi::types::GLint,
 }
 
@@ -74,6 +87,31 @@ unsafe fn compile_program(gl: &ffi::Gles2, src: &str) -> Result<BlurProgramInter
     })
 }
 
+unsafe fn compile_finish_program(gl: &ffi::Gles2) -> Result<BlurFinish, GlesError> {
+    let program = unsafe {
+        link_program(
+            gl,
+            include_str!("shaders/blur.vert"),
+            include_str!("shaders/blur_finish.frag"),
+        )?
+    };
+
+    let vert = c"vert";
+    let tex = c"tex";
+    let alpha_tex = c"alpha_tex";
+    let ignore_alpha = c"ignore_alpha";
+    let geo = c"geo";
+
+    Ok(BlurFinish {
+        program,
+        uniform_tex: gl.GetUniformLocation(program, tex.as_ptr()),
+        uniform_alpha_tex: gl.GetUniformLocation(program, alpha_tex.as_ptr()),
+        uniform_ignore_alpha: gl.GetUniformLocation(program, ignore_alpha.as_ptr()),
+        uniform_geo: gl.GetUniformLocation(program, geo.as_ptr()),
+        attrib_vert: gl.GetAttribLocation(program, vert.as_ptr()),
+    })
+}
+
 impl BlurProgram {
     pub fn compile(renderer: &mut GlesRenderer) -> anyhow::Result<Self> {
         renderer
@@ -82,7 +120,9 @@ impl BlurProgram {
                     .context("error compiling blur_down shader")?;
                 let up = compile_program(gl, include_str!("shaders/blur_up.frag"))
                     .context("error compiling blur_up shader")?;
-                Ok(Self(Rc::new(BlurProgramInner { down, up })))
+                let finish =
+                    compile_finish_program(gl).context("error compiling blur_finish shader")?;
+                Ok(Self(Rc::new(BlurProgramInner { down, up, finish })))
             })
             .context("error making GL context current")?
     }
@@ -91,18 +131,24 @@ impl BlurProgram {
         renderer.with_context(move |gl| unsafe {
             gl.DeleteProgram(self.0.down.program);
             gl.DeleteProgram(self.0.up.program);
+            gl.DeleteProgram(self.0.finish.program);
         })
     }
 }
 
 impl Blur {
-    pub fn new(renderer: &mut GlesRenderer) -> Option<Self> {
+    pub fn new(renderer: &mut GlesRenderer, alpha_tex: Option<GlesTexture>) -> Option<Self> {
         let program = Shaders::get(renderer).blur.clone()?;
         Some(Self {
             program,
             renderer_context_id: renderer.context_id(),
             textures: Vec::new(),
+            alpha_tex,
         })
+    }
+
+    pub fn update_alpha_tex(&mut self, alpha_tex: Option<GlesTexture>) {
+        self.alpha_tex = alpha_tex;
     }
 
     pub fn context_id(&self) -> ContextId<GlesTexture> {
@@ -339,6 +385,52 @@ impl Blur {
             }
 
             gl.DisableVertexAttribArray(program.attrib_vert as u32);
+
+            //finish
+
+            let program = &self.program.0.finish;
+
+            let mut has_alpha_tex = false;
+            if let Some(alpha_tex) = self.alpha_tex.clone() {
+                gl.ActiveTexture(ffi::TEXTURE1);
+                gl.BindTexture(ffi::TEXTURE_2D, alpha_tex.tex_id());
+                gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
+                gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
+                has_alpha_tex = true;
+            }
+
+            gl.UseProgram(program.program);
+            gl.ActiveTexture(ffi::TEXTURE0);
+            gl.Uniform1i(program.uniform_tex, 0);
+            gl.Uniform1f(program.uniform_ignore_alpha, 0.1 as f32);
+            gl.Uniform1i(program.uniform_alpha_tex, if has_alpha_tex { 1 } else { 0 });
+
+            let vertices: [f32; 12] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0];
+
+            let mut vbo = 0;
+            gl.GenBuffers(1, &mut vbo);
+            gl.BindBuffer(ffi::ARRAY_BUFFER, vbo);
+            gl.BufferData(
+                ffi::ARRAY_BUFFER,
+                (vertices.len() * std::mem::size_of::<f32>()) as isize,
+                vertices.as_ptr().cast(),
+                ffi::STREAM_DRAW,
+            );
+
+            gl.EnableVertexAttribArray(program.attrib_vert as u32);
+            gl.VertexAttribPointer(
+                program.attrib_vert as u32,
+                2,
+                ffi::FLOAT,
+                ffi::FALSE,
+                0,
+                std::ptr::null(),
+            );
+
+            gl.DrawArrays(ffi::TRIANGLES, 0, 6);
+            gl.DisableVertexAttribArray(program.attrib_vert as u32);
+
+            //finish end
 
             gl.BindFramebuffer(ffi::FRAMEBUFFER, 0);
             gl.DeleteFramebuffers(fbos.len() as _, fbos.as_ptr());
