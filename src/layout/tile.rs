@@ -477,6 +477,17 @@ impl<W: LayoutElement> Tile<W> {
         let animated_tile_size = self.animated_tile_size();
         let expanded_progress = self.expanded_progress();
 
+        let radius = rules
+            .geometry_corner_radius
+            .unwrap_or_default()
+            .scaled_by(1. - expanded_progress as f32);
+        let has_blur_region = self.window.blur_region().is_some_and(|r| !r.is_empty());
+        self.background_effect.update_render_elements(
+            radius,
+            rules.background_effect,
+            has_blur_region,
+        );
+
         let draw_border_with_background = rules
             .draw_border_with_background
             .unwrap_or_else(|| !self.window.has_ssd());
@@ -530,10 +541,6 @@ impl<W: LayoutElement> Tile<W> {
             1. - expanded_progress as f32,
             exponent,
         );
-
-        let has_blur_region = self.window.blur_region().is_some_and(|r| !r.is_empty());
-        self.background_effect
-            .update_render_elements(rules.background_effect, has_blur_region);
 
         let draw_focus_ring_with_background = if self.border.is_off() {
             draw_border_with_background
@@ -1369,14 +1376,10 @@ impl<W: LayoutElement> Tile<W> {
 
             if let Some(geometry) = blur_geometry {
                 pos_in_backdrop += (geometry.loc - area.loc).upscale(zoom);
-                let corner_radius = rules
-                    .geometry_corner_radius
-                    .unwrap_or_default()
-                    .scaled_by(1. - expanded_progress as f32);
                 let params = background_effect::RenderParams {
                     geometry,
                     subregion,
-                    clip: clip.then_some((area, corner_radius)),
+                    clip: clip.then_some((area, CornerRadius::default())),
                     pos_in_backdrop,
                     zoom,
                     scale: self.scale,

@@ -12,7 +12,7 @@ use smithay::backend::renderer::{
 use smithay::utils::{Buffer, Logical, Physical, Scale, Size, Transform};
 
 use crate::niri::OutputRenderElements;
-use crate::render_helpers::blur::Blur;
+use crate::render_helpers::blur::{Blur, BlurOptions};
 
 #[derive(Debug)]
 pub struct EffectBuffer {
@@ -23,8 +23,8 @@ pub struct EffectBuffer {
     size: Size<i32, Buffer>,
     /// Scale of the effect buffer.
     scale: Scale<f64>,
-    /// Config for blurring.
-    blur_config: niri_config::Blur,
+    /// Options for blurring.
+    blur_options: BlurOptions,
 
     /// Elements to be rendered on demand.
     elements: Elements,
@@ -61,8 +61,6 @@ struct Offscreen {
     /// Rendered blurred version of the texture.
     ///
     /// When texture needs to be reblurred, this field must be reset to `None`.
-    // TODO: store Option<Option<GlesTexture>> where Some(None) means we already tried rendering it
-    // once this frame and failed.
     blurred: Option<GlesTexture>,
 }
 
@@ -78,7 +76,7 @@ impl EffectBuffer {
             id: Id::new(),
             size: Size::default(),
             scale: Scale::from(1.),
-            blur_config: niri_config::Blur::default(),
+            blur_options: BlurOptions::default(),
             elements: Elements::default(),
             offscreen: None,
             blur: None,
@@ -94,10 +92,6 @@ impl EffectBuffer {
         self.commit_counter
     }
 
-    pub fn blur_config(&self) -> niri_config::Blur {
-        self.blur_config
-    }
-
     pub fn logical_size(&self) -> Size<f64, Logical> {
         self.size.to_f64().to_logical(self.scale, Transform::Normal)
     }
@@ -111,12 +105,12 @@ impl EffectBuffer {
         self.scale = scale;
     }
 
-    pub fn update_blur_config(&mut self, config: niri_config::Blur) {
-        if self.blur_config == config {
+    pub fn update_blur_options(&mut self, options: BlurOptions) {
+        if self.blur_options == options {
             return;
         }
 
-        self.blur_config = config;
+        self.blur_options = options;
 
         if let Some(offscreen) = &mut self.offscreen {
             if offscreen.blurred.is_some() {
@@ -139,23 +133,20 @@ impl EffectBuffer {
         elements
     }
 
-    pub fn prepare(&mut self, renderer: &mut GlesRenderer, blur: bool) -> Option<bool> {
+    pub fn prepare(&mut self, renderer: &mut GlesRenderer, blur: bool) -> bool {
         if let Err(err) = self.prepare_offscreen(renderer) {
             warn!("error preparing offscreen: {err:?}");
-            return None;
+            return false;
         };
 
-        // TODO: make sure it's known whether the blur is prepared or not. Reset the prepared flag
-        // as necessary. During a frame, if any call to prepare() needs blur, prepare it.
-        let blur = blur && !self.blur_config.off;
         if blur {
             if let Err(err) = self.prepare_blur(renderer) {
                 warn!("error preparing blur: {err:?}");
-                return None;
+                return false;
             }
         }
 
-        Some(blur)
+        true
     }
 
     fn prepare_offscreen(&mut self, renderer: &mut GlesRenderer) -> anyhow::Result<()> {
@@ -294,7 +285,7 @@ impl EffectBuffer {
         blur.prepare_textures(
             |fourcc, size| renderer.create_buffer(fourcc, size),
             &offscreen.texture,
-            self.blur_config,
+            self.blur_options,
         )
         .context("error preparing blur textures")?;
 
@@ -313,7 +304,7 @@ impl EffectBuffer {
         } else {
             let blur = self.blur.as_mut().context("blur is missing")?;
             let blurred = blur
-                .render(frame, &offscreen.texture, self.blur_config)
+                .render(frame, &offscreen.texture, self.blur_options)
                 .context("error rendering blur")?;
             offscreen.blurred.insert(blurred).clone()
         };

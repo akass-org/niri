@@ -22,8 +22,21 @@ pub struct Blur {
     ///
     /// Created lazily and stored here to avoid recreating blur textures frequently.
     textures: Vec<GlesTexture>,
-    /// Config to use for rendering.
-    config: niri_config::Blur,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct BlurOptions {
+    pub passes: u8,
+    pub offset: f64,
+}
+
+impl From<niri_config::Blur> for BlurOptions {
+    fn from(config: niri_config::Blur) -> Self {
+        Self {
+            passes: config.passes,
+            offset: config.offset,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -89,7 +102,6 @@ impl Blur {
             program,
             renderer_context_id: renderer.context_id(),
             textures: Vec::new(),
-            config: niri_config::Blur::default(),
         })
     }
 
@@ -101,13 +113,11 @@ impl Blur {
         &mut self,
         mut create_texture: impl FnMut(Fourcc, Size<i32, Buffer>) -> Result<GlesTexture, GlesError>,
         source: &GlesTexture,
-        config: niri_config::Blur,
+        options: BlurOptions,
     ) -> anyhow::Result<()> {
         let _span = tracy_client::span!("Blur::prepare_textures");
 
-        self.config = config;
-
-        let passes = config.passes.clamp(1, 31) as usize;
+        let passes = options.passes.clamp(1, 31) as usize;
         let size = source.size();
 
         if let Some(output) = self.textures.first_mut() {
@@ -159,7 +169,7 @@ impl Blur {
         &mut self,
         frame: &mut GlesFrame,
         source: &GlesTexture,
-        config: niri_config::Blur,
+        options: BlurOptions,
     ) -> anyhow::Result<GlesTexture> {
         let _span = tracy_client::span!("Blur::render");
         trace!("rendering blur");
@@ -169,7 +179,7 @@ impl Blur {
             "wrong renderer"
         );
 
-        let passes = config.passes.clamp(1, 31) as usize;
+        let passes = options.passes.clamp(1, 31) as usize;
         let size = source.size();
 
         ensure!(
@@ -211,7 +221,7 @@ impl Blur {
             let program = &self.program.0.down;
             gl.UseProgram(program.program);
             gl.Uniform1i(program.uniform_tex, 0);
-            gl.Uniform1f(program.uniform_offset, config.offset as f32);
+            gl.Uniform1f(program.uniform_offset, options.offset as f32);
 
             let vertices: [f32; 12] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0];
             gl.EnableVertexAttribArray(program.attrib_vert as u32);
@@ -271,7 +281,7 @@ impl Blur {
             let program = &self.program.0.up;
             gl.UseProgram(program.program);
             gl.Uniform1i(program.uniform_tex, 0);
-            gl.Uniform1f(program.uniform_offset, config.offset as f32);
+            gl.Uniform1f(program.uniform_offset, options.offset as f32);
 
             let vertices: [f32; 12] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0];
             gl.EnableVertexAttribArray(program.attrib_vert as u32);

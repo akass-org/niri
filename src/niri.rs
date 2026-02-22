@@ -150,6 +150,7 @@ use crate::protocols::mutter_x11_interop::MutterX11InteropManagerState;
 use crate::protocols::output_management::OutputManagementManagerState;
 use crate::protocols::screencopy::{Screencopy, ScreencopyBuffer, ScreencopyManagerState};
 use crate::protocols::virtual_pointer::VirtualPointerManagerState;
+use crate::render_helpers::blur::BlurOptions;
 use crate::render_helpers::debug::push_opaque_regions;
 use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use crate::render_helpers::renderer::NiriRenderer;
@@ -4081,15 +4082,16 @@ impl Niri {
                     state.xray.workspaces.push((geo, bg_color));
                 }
                 state.xray.backdrop_color = state.backdrop_buffer.color();
+                let blur_options = BlurOptions::from(self.config.borrow().blur);
                 for buf in &state.xray.background {
                     let mut buffer = buf.borrow_mut();
                     buffer.update_size(size, scale);
-                    buffer.update_blur_config(self.config.borrow().blur);
+                    buffer.update_blur_options(blur_options);
                 }
                 for buf in &state.xray.backdrop {
                     let mut buffer = buf.borrow_mut();
                     buffer.update_size(size, scale);
-                    buffer.update_blur_config(self.config.borrow().blur);
+                    buffer.update_blur_options(blur_options);
                 }
 
                 if let Some(transition) = &mut state.screen_transition {

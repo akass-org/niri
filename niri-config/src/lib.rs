@@ -1862,10 +1862,7 @@ mod tests {
                     tiled_state: None,
                     background_effect: BackgroundEffectRule {
                         xray: None,
-                        blur: BlurRule {
-                            off: false,
-                            on: false,
-                        },
+                        blur: None,
                         noise: None,
                         saturation: None,
                     },
@@ -1883,6 +1880,7 @@ mod tests {
                                 ),
                             ),
                             at_startup: None,
+                            layer: None,
                         },
                     ],
                     excludes: [],
@@ -1905,10 +1903,7 @@ mod tests {
                     baba_is_float: None,
                     background_effect: BackgroundEffectRule {
                         xray: None,
-                        blur: BlurRule {
-                            off: false,
-                            on: false,
-                        },
+                        blur: None,
                         noise: None,
                         saturation: None,
                     },

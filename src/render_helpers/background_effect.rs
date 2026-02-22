@@ -6,8 +6,9 @@ use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::utils::{Logical, Physical, Point, Rectangle, Scale};
 
 use crate::niri_render_elements;
+use crate::render_helpers::blur::BlurOptions;
 use crate::render_helpers::damage::ExtraDamage;
-use crate::render_helpers::framebuffer_effect::FramebufferEffectElement;
+use crate::render_helpers::framebuffer_effect::{FramebufferEffect, FramebufferEffectElement};
 use crate::render_helpers::xray::XrayElement;
 use crate::render_helpers::{RenderCtx, RenderTarget};
 
@@ -15,9 +16,15 @@ use crate::render_helpers::{RenderCtx, RenderTarget};
 pub struct BackgroundEffect {
     // Framebuffer effects are per-render-target because they store the framebuffer contents in a
     // texture, and those differ per render target.
-    nonxray: [FramebufferEffectElement; RenderTarget::COUNT],
+    nonxray: [FramebufferEffect; RenderTarget::COUNT],
     /// Damage when options change.
     damage: ExtraDamage,
+    /// Corner radius for clipping.
+    ///
+    /// Stored here in addition to `RenderParams` to damage when it changes.
+    // FIXME: would be good to remove this duplication of radius.
+    corner_radius: CornerRadius,
+    blur_config: niri_config::Blur,
     options: Options,
 }
 
@@ -60,6 +67,9 @@ pub struct RenderParams {
 impl RenderParams {
     fn fit_clip_radius(&mut self) {
         if let Some((geo, radius)) = &mut self.clip {
+            // HACK: increase radius to avoid slight bleed on rounded corners.
+            *radius = radius.expanded_by(1.);
+
             *radius = radius.fit_to(geo.size.w as f32, geo.size.h as f32);
         }
     }
@@ -112,7 +122,6 @@ impl EffectSubregion {
         filtered: &mut Vec<Rectangle<i32, Physical>>,
     ) {
         let scale = dst.size.to_f64() / crop.size;
-        let dst_loc_logical = dst.loc.to_f64().to_logical(scale);
 
         let cs = crop.size.to_point();
 
@@ -122,29 +131,19 @@ impl EffectSubregion {
             b -= crop.loc;
 
             // Intersect with crop.
-            let mut ia = Point::new(f64::max(a.x, 0.), f64::max(a.y, 0.));
-            let mut ib = Point::new(f64::min(b.x, cs.x), f64::min(b.y, cs.y));
+            let ia = Point::new(f64::max(a.x, 0.), f64::max(a.y, 0.));
+            let ib = Point::new(f64::min(b.x, cs.x), f64::min(b.y, cs.y));
             if ib.x <= ia.x || ib.y <= ia.y {
                 // No intersection.
                 continue;
             }
-
-            // Convert to framebuffer-relative.
-            //
-            // We round in framebuffer coordinate space so that it's consistent between different
-            // different layers of xray (backdrop and background).
-            ia += dst_loc_logical;
-            ib += dst_loc_logical;
 
             // Round extremities to physical pixels, ensuring that adjacent rectangles stay adjacent
             // at fractional scales.
             let ia = ia.to_physical_precise_round(scale);
             let ib = ib.to_physical_precise_round(scale);
 
-            let mut r = Rectangle::from_extremities(ia, ib);
-
-            // Convert back to dst-relative physical.
-            r.loc -= dst.loc;
+            let r = Rectangle::from_extremities(ia, ib);
 
             // Intersect with each damage rect.
             for d in damage {
@@ -167,20 +166,26 @@ niri_render_elements! {
 impl BackgroundEffect {
     pub fn new() -> Self {
         Self {
-            nonxray: array::from_fn(|_| FramebufferEffectElement::new()),
+            nonxray: array::from_fn(|_| FramebufferEffect::new()),
             damage: ExtraDamage::new(),
+            corner_radius: CornerRadius::default(),
+            blur_config: niri_config::Blur::default(),
             options: Options::default(),
         }
     }
 
     pub fn update_config(&mut self, config: niri_config::Blur) {
-        for elem in &mut self.nonxray {
-            elem.update_config(config);
+        if self.blur_config == config {
+            return;
         }
+
+        self.blur_config = config;
+        self.damage.damage_all();
     }
 
     pub fn update_render_elements(
         &mut self,
+        corner_radius: CornerRadius,
         effect: niri_config::BackgroundEffect,
         has_blur_region: bool,
     ) {
@@ -204,10 +209,15 @@ impl BackgroundEffect {
             options.xray = true;
         }
 
-        if self.options != options {
-            self.options = options;
-            self.damage.damage_all();
+        // FIXME: do we also need to damage when subregion changes? Then we'll need to pass
+        // subregion in update_render_elements().
+        if self.options == options && self.corner_radius == corner_radius {
+            return;
         }
+
+        self.options = options;
+        self.corner_radius = corner_radius;
+        self.damage.damage_all();
     }
 
     pub fn is_visible(&self) -> bool {
@@ -224,9 +234,25 @@ impl BackgroundEffect {
             return;
         }
 
+        if let Some(clip) = &mut params.clip {
+            clip.1 = self.corner_radius;
+        }
         params.fit_clip_radius();
 
         let damage = self.damage.render(params.geometry);
+
+        // Use noise/saturation from options, falling back to blur defaults if blurred, and
+        // to no effect if not blurred.
+        let blur = self.options.blur && !self.blur_config.off;
+        let blur_options = blur.then_some(BlurOptions::from(self.blur_config));
+        let noise = if blur { self.blur_config.noise } else { 0. };
+        let noise = self.options.noise.unwrap_or(noise) as f32;
+        let saturation = if blur {
+            self.blur_config.saturation
+        } else {
+            1.
+        };
+        let saturation = self.options.saturation.unwrap_or(saturation) as f32;
 
         if self.options.xray {
             let Some(xray) = ctx.xray else {
@@ -234,11 +260,13 @@ impl BackgroundEffect {
             };
 
             push(damage.into());
-            xray.render(ctx, self.options, params, &mut |elem| push(elem.into()));
+            xray.render(ctx, params, blur, noise, saturation, &mut |elem| {
+                push(elem.into())
+            });
         } else {
             // Render non-xray effect.
             let elem = &self.nonxray[ctx.target as usize];
-            if let Some(elem) = elem.render(ctx.renderer, self.options, params) {
+            if let Some(elem) = elem.render(ctx.renderer, params, blur_options, noise, saturation) {
                 push(damage.into());
                 push(elem.into());
             }

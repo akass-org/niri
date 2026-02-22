@@ -13,7 +13,7 @@ use smithay::backend::renderer::Color32F;
 use smithay::utils::{Buffer, Logical, Physical, Rectangle, Scale, Size, Transform};
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
-use crate::render_helpers::background_effect::{EffectSubregion, Options, RenderParams};
+use crate::render_helpers::background_effect::{EffectSubregion, RenderParams};
 use crate::render_helpers::effect_buffer::EffectBuffer;
 use crate::render_helpers::renderer::AsGlesFrame as _;
 use crate::render_helpers::shaders::{mat3_uniform, Shaders};
@@ -32,7 +32,6 @@ pub struct Xray {
 pub struct XrayElement {
     buffer: Rc<RefCell<EffectBuffer>>,
     id: Id,
-    blur: bool,
     geometry: Rectangle<f64, Logical>,
     src: Rectangle<f64, Buffer>,
     subregion: Option<EffectSubregion>,
@@ -40,6 +39,7 @@ pub struct XrayElement {
     clip_geo_size: Vec2,
     corner_radius: CornerRadius,
     scale: f32,
+    blur: bool,
     noise: f32,
     saturation: f32,
     bg_color: Color32F,
@@ -59,8 +59,10 @@ impl Xray {
     pub fn render(
         &self,
         ctx: RenderCtx<GlesRenderer>,
-        options: Options,
         params: RenderParams,
+        blur: bool,
+        noise: f32,
+        saturation: f32,
         push: &mut dyn FnMut(XrayElement),
     ) {
         let program = Shaders::get(ctx.renderer).postprocess_and_clip.clone();
@@ -71,39 +73,40 @@ impl Xray {
 
         let clip_pos_in_backdrop =
             params.pos_in_backdrop + (clip_geo.loc - params.geometry.loc).upscale(params.zoom);
-        let clip_geo_in_backdrop =
-            Rectangle::new(clip_pos_in_backdrop, clip_geo.size.upscale(params.zoom));
 
         let geo_in_backdrop = Rectangle::new(
             params.pos_in_backdrop,
             params.geometry.size.upscale(params.zoom),
         );
 
+        let mut skip_backdrop = false;
+
         let mut background = self.background[ctx.target as usize].borrow_mut();
         let prev = background.commit();
-        if let Some(blur) = background.prepare(ctx.renderer, options.blur) {
+        if background.prepare(ctx.renderer, blur) {
             if background.commit() != prev {
                 debug!("background damaged");
             }
-
-            // Use noise/saturation from options, falling back to blur defaults if blurred, and
-            // to no effect if not blurred.
-            let blur_config = background.blur_config();
-            let noise = options
-                .noise
-                .unwrap_or(if blur { blur_config.noise } else { 0. })
-                as f32;
-            let saturation =
-                options
-                    .saturation
-                    .unwrap_or(if blur { blur_config.saturation } else { 1. })
-                    as f32;
 
             let clip_geo_size = Vec2::new(clip_geo.size.w as f32, clip_geo.size.h as f32);
             let buf_size = background.logical_size();
 
             for (ws_geo, bg_color) in &self.workspaces {
-                let Some(crop) = ws_geo.intersection(geo_in_backdrop) else {
+                // If the background color is opaque, check if the workspace fully covers the
+                // element. In this case, we will skip the backdrop element since it's fully
+                // covered.
+                //
+                // FIXME: also implement some way to check if the background elements are fully
+                // covered in opaque regions, and not just the niri background color is opaque
+                let crop = if bg_color.is_opaque() && ws_geo.contains_rect(geo_in_backdrop) {
+                    skip_backdrop = true;
+                    // No need to intersect, we know it's fully covered.
+                    Some(geo_in_backdrop)
+                } else {
+                    ws_geo.intersection(geo_in_backdrop)
+                };
+
+                let Some(crop) = crop else {
                     continue;
                 };
 
@@ -133,7 +136,6 @@ impl Xray {
                 let elem = XrayElement {
                     buffer: self.background[ctx.target as usize].clone(),
                     id: background.id().clone(),
-                    blur,
                     geometry,
                     src,
                     subregion: params.subregion.clone(),
@@ -141,6 +143,7 @@ impl Xray {
                     clip_geo_size,
                     corner_radius,
                     scale: params.scale as f32,
+                    blur,
                     noise,
                     saturation,
                     bg_color: *bg_color,
@@ -149,28 +152,18 @@ impl Xray {
                 push(elem);
             }
         }
-        // TODO: we can try to compute when background fully covers the geometry and has a fully
-        // opaque bg color, and skip pushing the backdrop element.
+
+        // If the backdrop is fully covered by opaque background, we can skip it.
+        if skip_backdrop {
+            return;
+        }
 
         let mut backdrop = self.backdrop[ctx.target as usize].borrow_mut();
         let prev = backdrop.commit();
-        if let Some(blur) = backdrop.prepare(ctx.renderer, options.blur) {
+        if backdrop.prepare(ctx.renderer, blur) {
             if backdrop.commit() != prev {
                 debug!("backdrop damaged");
             }
-
-            // Use noise/saturation from options, falling back to blur defaults if blurred, and
-            // to no effect if not blurred.
-            let blur_config = backdrop.blur_config();
-            let noise = options
-                .noise
-                .unwrap_or(if blur { blur_config.noise } else { 0. })
-                as f32;
-            let saturation =
-                options
-                    .saturation
-                    .unwrap_or(if blur { blur_config.saturation } else { 1. })
-                    as f32;
 
             let src = geo_in_backdrop.to_buffer(
                 backdrop.scale(),
@@ -178,14 +171,13 @@ impl Xray {
                 &backdrop.logical_size(),
             );
 
-            let clip_pos_in_backdrop = Vec2::new(
-                clip_geo_in_backdrop.loc.x as f32,
-                clip_geo_in_backdrop.loc.y as f32,
-            );
+            let clip_pos_in_backdrop =
+                Vec2::new(clip_pos_in_backdrop.x as f32, clip_pos_in_backdrop.y as f32);
 
+            let clip_size_in_backdrop = clip_geo.size.upscale(params.zoom);
             let clip_geo_size = Vec2::new(
-                clip_geo_in_backdrop.size.w as f32,
-                clip_geo_in_backdrop.size.h as f32,
+                clip_size_in_backdrop.w as f32,
+                clip_size_in_backdrop.h as f32,
             );
             let buf_size = backdrop.logical_size();
             let buf_size = Vec2::new(buf_size.w as f32, buf_size.h as f32);
@@ -195,7 +187,6 @@ impl Xray {
             let elem = XrayElement {
                 buffer: self.backdrop[ctx.target as usize].clone(),
                 id: backdrop.id().clone(),
-                blur,
                 geometry: params.geometry,
                 src,
                 subregion: params.subregion.clone(),
@@ -203,6 +194,7 @@ impl Xray {
                 clip_geo_size,
                 corner_radius: corner_radius.scaled_by(params.zoom as f32),
                 scale: params.scale as f32,
+                blur,
                 noise,
                 saturation,
                 bg_color: self.backdrop_color,

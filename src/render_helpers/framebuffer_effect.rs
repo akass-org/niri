@@ -14,21 +14,28 @@ use smithay::gpu_span_location;
 use smithay::utils::{Buffer, Logical, Physical, Rectangle, Scale, Transform};
 
 use crate::backend::tty::{TtyFrame, TtyRenderer, TtyRendererError};
-use crate::render_helpers::background_effect::{EffectSubregion, Options, RenderParams};
-use crate::render_helpers::blur::Blur;
+use crate::render_helpers::background_effect::{EffectSubregion, RenderParams};
+use crate::render_helpers::blur::{Blur, BlurOptions};
 use crate::render_helpers::renderer::AsGlesFrame as _;
 use crate::render_helpers::shaders::{mat3_uniform, Shaders};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
+pub struct FramebufferEffect {
+    id: Id,
+    inner: Rc<RefCell<Option<Inner>>>,
+}
+
+#[derive(Debug)]
 pub struct FramebufferEffectElement {
     id: Id,
-    commit: CommitCounter,
     geometry: Rectangle<f64, Logical>,
     clip_geo: Rectangle<f64, Logical>,
     corner_radius: CornerRadius,
     subregion: Option<EffectSubregion>,
     scale: f32,
-    blur_config: niri_config::Blur,
+    blur_options: Option<BlurOptions>,
+    noise: f32,
+    saturation: f32,
     inner: Rc<RefCell<Option<Inner>>>,
 }
 
@@ -42,62 +49,41 @@ struct Inner {
     subregion_damage: Vec<Rectangle<i32, Physical>>,
 }
 
-impl FramebufferEffectElement {
+impl FramebufferEffect {
     pub fn new() -> Self {
         Self {
             id: Id::new(),
-            commit: CommitCounter::default(),
-            geometry: Rectangle::zero(),
-            clip_geo: Rectangle::zero(),
-            corner_radius: CornerRadius::default(),
-            subregion: None,
-            scale: 1.,
-            blur_config: niri_config::Blur::default(),
             inner: Rc::new(RefCell::new(None)),
         }
-    }
-
-    pub fn update_config(&mut self, config: niri_config::Blur) {
-        if self.blur_config == config {
-            return;
-        }
-
-        self.blur_config = config;
-
-        let mut inner = self.inner.borrow_mut();
-        if let Some(inner) = &mut *inner {
-            inner.intermediate = None;
-        }
-
-        self.commit.increment();
     }
 
     pub fn render(
         &self,
         renderer: &mut GlesRenderer,
-        options: Options,
         params: RenderParams,
-    ) -> Option<Self> {
-        let mut this = self.clone();
-        this.blur_config.off |= !options.blur;
-        if this.blur_config.off || options.noise.is_some() {
-            this.blur_config.noise = options.noise.unwrap_or(0.);
-        }
-        if this.blur_config.off || options.saturation.is_some() {
-            this.blur_config.saturation = options.saturation.unwrap_or(1.5);
-        }
-        this.geometry = params.geometry;
-        this.scale = params.scale as f32;
-        this.subregion = params.subregion;
-
+        blur_options: Option<BlurOptions>,
+        noise: f32,
+        saturation: f32,
+    ) -> Option<FramebufferEffectElement> {
         let (clip_geo, corner_radius) = params
             .clip
             .unwrap_or((params.geometry, CornerRadius::default()));
-        this.clip_geo = clip_geo;
-        this.corner_radius = corner_radius;
+
+        let element = FramebufferEffectElement {
+            id: self.id.clone(),
+            geometry: params.geometry,
+            clip_geo,
+            corner_radius,
+            subregion: params.subregion,
+            scale: params.scale as f32,
+            blur_options,
+            noise,
+            saturation,
+            inner: self.inner.clone(),
+        };
 
         {
-            let mut inner = this.inner.borrow_mut();
+            let mut inner = element.inner.borrow_mut();
 
             let inner = if let Some(inner) = &*inner {
                 inner
@@ -106,15 +92,17 @@ impl FramebufferEffectElement {
                 inner.insert(Inner::new(renderer, blur))
             };
 
-            if !this.blur_config.off && inner.blur.is_none() {
+            if blur_options.is_some() && inner.blur.is_none() {
                 // Blur is requested but the shader is unavailable.
                 return None;
             }
         }
 
-        Some(this)
+        Some(element)
     }
+}
 
+impl FramebufferEffectElement {
     fn compute_uniforms(
         &self,
         crop: Rectangle<f64, Logical>,
@@ -142,8 +130,8 @@ impl FramebufferEffectElement {
             Uniform::new("geo_size", clip_geo_size),
             Uniform::new("corner_radius", <[f32; 4]>::from(self.corner_radius)),
             mat3_uniform("input_to_geo", input_to_clip_geo),
-            Uniform::new("noise", self.blur_config.noise as f32),
-            Uniform::new("saturation", self.blur_config.saturation as f32),
+            Uniform::new("noise", self.noise),
+            Uniform::new("saturation", self.saturation),
             Uniform::new("bg_color", [0f32, 0., 0., 0.]),
         ]
     }
@@ -155,7 +143,7 @@ impl Element for FramebufferEffectElement {
     }
 
     fn current_commit(&self) -> CommitCounter {
-        self.commit
+        CommitCounter::default()
     }
 
     fn src(&self) -> Rectangle<f64, Buffer> {
@@ -236,12 +224,12 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
             };
 
             // Prepare blur textures.
-            let mut blur = inner.blur.as_mut().filter(|_| !self.blur_config.off);
-            if let Some(b) = &mut blur {
+            let mut blur = Option::zip(inner.blur.as_mut(), self.blur_options);
+            if let Some((b, options)) = &mut blur {
                 if let Err(err) = b.prepare_textures(
                     |fourcc, size| frame.create_texture(fourcc, size),
                     framebuffer,
-                    self.blur_config,
+                    *options,
                 ) {
                     warn!("error preparing blur textures: {err:?}");
                     blur = None;
@@ -301,13 +289,13 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
             })??;
 
             // If blur is off, use the unblurred texture.
-            if self.blur_config.off {
+            if self.blur_options.is_none() {
                 inner.intermediate = Some(framebuffer.clone());
                 return Ok(());
             }
 
-            if let Some(blur) = blur {
-                match blur.render(frame, framebuffer, self.blur_config) {
+            if let Some((blur, options)) = blur {
+                match blur.render(frame, framebuffer, options) {
                     Ok(blurred) => inner.intermediate = Some(blurred),
                     Err(err) => {
                         warn!("error rendering blur: {err:?}");

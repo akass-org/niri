@@ -2,13 +2,11 @@ use knuffel::errors::DecodeError;
 use niri_ipc::{ColumnDisplay, SizeChange};
 
 use crate::appearance::{
-    Blur, Border, FocusRing, InsertHint, Shadow, TabIndicator, DEFAULT_BACKDROP_COLOR,
+    Border, FocusRing, InsertHint, Shadow, TabIndicator, DEFAULT_BACKDROP_COLOR,
     DEFAULT_BACKGROUND_COLOR,
 };
 use crate::utils::{expect_only_children, Flag, MergeWith};
-use crate::{
-    BlurRule, BorderRule, Color, FloatOrInt, InsertHintPart, ShadowRule, TabIndicatorPart,
-};
+use crate::{BorderRule, Color, FloatOrInt, InsertHintPart, ShadowRule, TabIndicatorPart};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
@@ -135,8 +133,6 @@ pub struct LayoutPart {
     pub struts: Option<Struts>,
     #[knuffel(child)]
     pub background_color: Option<Color>,
-    #[knuffel(child)]
-    pub blur: Option<BlurRule>,
     #[knuffel(child)]
     pub background_in_working_area_only: Option<Flag>,
     #[knuffel(child)]

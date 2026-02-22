@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use niri_config::utils::MergeWith as _;
-use niri_config::{Blur, Config, LayerRule};
+use niri_config::{Config, CornerRadius, LayerRule};
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
@@ -120,8 +120,11 @@ impl MappedLayer {
             .update_render_elements(size, true, radius, self.scale, 1., exponent);
 
         let has_blur_region = self.blur_region().is_some_and(|r| !r.is_empty());
-        self.background_effect
-            .update_render_elements(self.rules.background_effect, has_blur_region);
+        self.background_effect.update_render_elements(
+            radius,
+            self.rules.background_effect,
+            has_blur_region,
+        );
     }
 
     pub fn are_animations_ongoing(&self) -> bool {
@@ -262,11 +265,10 @@ impl MappedLayer {
 
             if let Some(geometry) = blur_geometry {
                 pos_in_backdrop += (geometry.loc - area.loc).upscale(zoom);
-                let corner_radius = self.rules.geometry_corner_radius.unwrap_or_default();
                 let params = background_effect::RenderParams {
                     geometry,
                     subregion,
-                    clip: clip.then_some((area, corner_radius)),
+                    clip: clip.then_some((area, CornerRadius::default())),
                     pos_in_backdrop,
                     zoom,
                     scale: self.scale,
