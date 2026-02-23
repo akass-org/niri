@@ -200,17 +200,19 @@ impl MappedLayer {
         pos_in_backdrop += self.bob_offset().upscale(zoom);
 
         if ctx.target.should_block_out(self.rules.block_out_from) {
-            // Round to physical pixels.
-            let location = location.to_physical_precise_round(scale).to_logical(scale);
+            if let Some(false) = self.rules.transparent_block {
+                // Round to physical pixels.
+                let location = location.to_physical_precise_round(scale).to_logical(scale);
 
-            // FIXME: take geometry-corner-radius into account.
-            let elem = SolidColorRenderElement::from_buffer(
-                &self.block_out_buffer,
-                location,
-                alpha,
-                Kind::Unspecified,
-            );
-            push(elem.into());
+                // FIXME: take geometry-corner-radius into account.
+                let elem = SolidColorRenderElement::from_buffer(
+                    &self.block_out_buffer,
+                    location,
+                    alpha,
+                    Kind::Unspecified,
+                );
+                push(elem.into());
+            }
         } else {
             // Layer surfaces don't have extra geometry like windows.
             let buf_pos = location;
@@ -250,8 +252,12 @@ impl MappedLayer {
                     // leaking any surface shapes. We render those layers as geometry-shaped solid
                     // rectangles anyway.
                     if ctx.target.should_block_out(self.rules.block_out_from) {
-                        clip = true;
-                        Some(area)
+                        if self.rules.transparent_block.is_some() {
+                            None
+                        } else {
+                            clip = true;
+                            Some(area)
+                        }
                     } else {
                         let mut main_surface_geo = self.main_surface_geo().to_f64();
                         main_surface_geo.loc += area.loc;
@@ -370,8 +376,12 @@ impl MappedLayer {
                         // leaking any surface shapes. We render those layers as geometry-shaped solid
                         // rectangles anyway.
                         if ctx.target.should_block_out(self.rules.block_out_from) {
-                            clip = true;
-                            Some(area)
+                            if self.rules.transparent_block.is_some() {
+                                None
+                            } else {
+                                clip = true;
+                                Some(area)
+                            }
                         } else {
                             let mut main_surface_geo = popup.geometry().to_f64();
                             main_surface_geo.loc += area.loc;
