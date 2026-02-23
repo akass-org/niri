@@ -245,6 +245,9 @@ impl MappedLayer {
                     // Surface has a set, but empty blur region.
                     None
                 } else {
+                    debug!(
+                        "rendering background effect for layer surface with blur region {rects:?}"
+                    );
                     // If the surface itself requests the effects, apply different defaults.
                     clip = false;
 
@@ -318,6 +321,7 @@ impl MappedLayer {
                     scale: self.scale,
                     alpha_tex,
                     ignore_alpha: self.rules.background_effect.ignore_alpha.unwrap_or(0.) as f32,
+                    exponent: self.rules.exponent.unwrap_or(2.8) as f32,
                 };
                 self.background_effect
                     .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));
@@ -443,6 +447,7 @@ impl MappedLayer {
                         alpha_tex,
                         ignore_alpha: self.rules.background_effect.ignore_alpha.unwrap_or(0.)
                             as f32,
+                        exponent: self.rules.exponent.unwrap_or(2.8) as f32,
                     };
                     self.background_effect
                         .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));

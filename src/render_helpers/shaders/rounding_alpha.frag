@@ -1,4 +1,5 @@
 uniform float exponent;
+
 float niri_rounding_alpha(vec2 coords, vec2 size, vec4 corner_radius) {
     // vec2 center;
     // float radius;
@@ -39,16 +40,14 @@ float niri_rounding_alpha(vec2 coords, vec2 size, vec4 corner_radius) {
     // 局部角落坐标
     vec2 q = abs(offset) - (size * 0.5 - rad);
 
-    // ------------------------
+    // 主区域直接返回 1.0
+    if(q.x < 0.0 && q.y < 0.0) {
+        return 1.0;
+    }
     // FG-squircle 核心公式
     vec2 corner = max(q, 0.0);      // 角落部分
     float dist = pow(pow(corner.x, exponent) + pow(corner.y, exponent), 1.0 / exponent) - rad;
 
-    // ------------------------
-    // 内部 alpha 修正：中心和边沿
-    float inside = min(max(q.x, q.y), 0.0); // q<0 时表示在矩形内部
-    dist += inside;
-
-    // 返回 alpha
+    // 过渡区平滑 alpha
     return 1.0 - smoothstep(-aa, aa, dist);
 }

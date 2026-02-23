@@ -1390,6 +1390,7 @@ impl<W: LayoutElement> Tile<W> {
                     scale: self.scale,
                     alpha_tex: None,
                     ignore_alpha: 0.,
+                    exponent,
                 };
                 self.background_effect
                     .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));

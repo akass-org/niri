@@ -68,7 +68,6 @@ struct BlurFinish {
     uniform_tex: ffi::types::GLint,
     uniform_alpha_tex: ffi::types::GLint,
     uniform_ignore_alpha: ffi::types::GLint,
-    uniform_geo: ffi::types::GLint,
     attrib_vert: ffi::types::GLint,
 }
 
@@ -102,14 +101,14 @@ unsafe fn compile_finish_program(gl: &ffi::Gles2) -> Result<BlurFinish, GlesErro
     let tex = c"tex";
     let alpha_tex = c"alpha_tex";
     let ignore_alpha = c"ignore_alpha";
-    let geo = c"geo";
+    // let geo = c"geo";
 
     Ok(BlurFinish {
         program,
         uniform_tex: gl.GetUniformLocation(program, tex.as_ptr()),
         uniform_alpha_tex: gl.GetUniformLocation(program, alpha_tex.as_ptr()),
         uniform_ignore_alpha: gl.GetUniformLocation(program, ignore_alpha.as_ptr()),
-        uniform_geo: gl.GetUniformLocation(program, geo.as_ptr()),
+        // uniform_geo: gl.GetUniformLocation(program, geo.as_ptr()),
         attrib_vert: gl.GetAttribLocation(program, vert.as_ptr()),
     })
 }

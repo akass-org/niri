@@ -67,6 +67,8 @@ pub struct RenderParams {
     pub alpha_tex: Option<GlesTexture>,
 
     pub ignore_alpha: f32,
+
+    pub exponent: f32,
 }
 
 impl RenderParams {
@@ -264,6 +266,8 @@ impl BackgroundEffect {
             .ignore_alpha
             .unwrap_or(self.blur_config.ignore_alpha.0 as f32);
 
+        let exponent = params.exponent;
+
         if self.options.xray {
             let Some(xray) = ctx.xray else {
                 return;
@@ -283,6 +287,7 @@ impl BackgroundEffect {
                 noise,
                 saturation,
                 ignore_alpha,
+                exponent,
             ) {
                 push(damage.into());
                 push(elem.into());

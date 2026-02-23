@@ -123,6 +123,7 @@ impl Shaders {
                     UniformName::new("noise", UniformType::_1f),
                     UniformName::new("saturation", UniformType::_1f),
                     UniformName::new("bg_color", UniformType::_4f),
+                    UniformName::new("exponent", UniformType::_1f),
                 ],
             )
             .map_err(|err| {

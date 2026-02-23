@@ -776,6 +776,7 @@ impl LayoutElement for Mapped {
                         alpha_tex,
                         ignore_alpha: self.rules.background_effect.ignore_alpha.unwrap_or(0.)
                             as f32,
+                        exponent: self.rules.rounding_exponent.unwrap_or(2.8) as f32,
                     };
                     self.background_effect
                         .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));

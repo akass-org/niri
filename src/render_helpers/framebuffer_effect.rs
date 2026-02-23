@@ -37,6 +37,7 @@ pub struct FramebufferEffectElement {
     noise: f32,
     saturation: f32,
     inner: Rc<RefCell<Option<Inner>>>,
+    exponent: f32,
 }
 
 #[derive(Debug)]
@@ -65,6 +66,7 @@ impl FramebufferEffect {
         noise: f32,
         saturation: f32,
         ignore_alpha: f32,
+        exponent: f32,
     ) -> Option<FramebufferEffectElement> {
         let (clip_geo, corner_radius) = params
             .clip
@@ -81,6 +83,7 @@ impl FramebufferEffect {
             noise,
             saturation,
             inner: self.inner.clone(),
+            exponent,
         };
 
         {
@@ -111,7 +114,7 @@ impl FramebufferEffectElement {
         &self,
         crop: Rectangle<f64, Logical>,
         transform: Transform,
-    ) -> [Uniform<'static>; 7] {
+    ) -> [Uniform<'static>; 8] {
         let offset = crop.loc - (self.clip_geo.loc - self.geometry.loc);
         let offset = Vec2::new(offset.x as f32, offset.y as f32);
         let crop_size = Vec2::new(crop.size.w as f32, crop.size.h as f32);
@@ -129,6 +132,8 @@ impl FramebufferEffectElement {
 
         let clip_geo_size = (self.clip_geo.size.w as f32, self.clip_geo.size.h as f32);
 
+        let exponent = self.exponent;
+
         [
             Uniform::new("niri_scale", self.scale),
             Uniform::new("geo_size", clip_geo_size),
@@ -137,6 +142,7 @@ impl FramebufferEffectElement {
             Uniform::new("noise", self.noise),
             Uniform::new("saturation", self.saturation),
             Uniform::new("bg_color", [0f32, 0., 0., 0.]),
+            Uniform::new("exponent", exponent),
         ]
     }
 }
