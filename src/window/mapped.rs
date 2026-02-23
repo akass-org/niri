@@ -643,7 +643,9 @@ impl LayoutElement for Mapped {
         push: &mut dyn FnMut(LayoutElementRenderElement<R>),
     ) {
         if ctx.target.should_block_out(self.rules.block_out_from) {
-            if let Some(false) = self.rules.transparent_block {
+            if let Some(true) = self.rules.transparent_block {
+                // no render
+            } else {
                 let mut buffer = self.block_out_buffer.borrow_mut();
                 buffer.resize(self.window.geometry().size.to_f64());
                 let elem = SolidColorRenderElement::from_buffer(
@@ -709,7 +711,7 @@ impl LayoutElement for Mapped {
             );
 
             if self.background_effect.is_visible() {
-                let area = Rectangle::new(location, self.block_out_buffer.borrow().size());
+                // let area = Rectangle::new(location, self.block_out_buffer.borrow().size());
                 let mut main_surface_geo = popup.geometry().to_f64();
                 main_surface_geo.loc = buf_pos + offset.to_f64();
 
@@ -769,7 +771,7 @@ impl LayoutElement for Mapped {
                     let params = background_effect::RenderParams {
                         geometry,
                         subregion,
-                        clip: Some((area, CornerRadius::default())),
+                        clip: None,
                         pos_in_backdrop: (buf_pos + offset.to_f64()),
                         zoom: 1.,
                         scale: scale.x,
