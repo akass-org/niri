@@ -278,7 +278,11 @@ impl MappedLayer {
                     }
                 }
             } else {
-                Some(area)
+                if self.rules.transparent_block.is_some() {
+                    None
+                } else {
+                    Some(area)
+                }
             };
 
             if let Some(geometry) = blur_geometry {
@@ -403,7 +407,11 @@ impl MappedLayer {
                         }
                     }
                 } else {
-                    Some(area)
+                    if self.rules.transparent_block.is_some() {
+                        None
+                    } else {
+                        Some(area)
+                    }
                 };
 
                 debug!("rendering background effect for popup ");

@@ -1355,8 +1355,12 @@ impl<W: LayoutElement> Tile<W> {
                     // leaking any surface shapes. We render those windows as geometry-shaped solid
                     // rectangles anyway.
                     if ctx.target.should_block_out(rules.block_out_from) {
-                        clip = true;
-                        Some(area)
+                        if rules.transparent_block.is_some() {
+                            None
+                        } else {
+                            clip = true;
+                            Some(area)
+                        }
                     } else {
                         let anim_scale = animated_window_size / window_size;
                         let mut main_surface_geo =
@@ -1376,7 +1380,11 @@ impl<W: LayoutElement> Tile<W> {
                     }
                 }
             } else {
-                Some(area)
+                if rules.transparent_block.is_some() {
+                    None
+                } else {
+                    Some(area)
+                }
             };
 
             if let Some(geometry) = blur_geometry {
