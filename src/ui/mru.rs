@@ -429,6 +429,9 @@ impl Thumbnail {
                 // Otherwise, render the solid color as is.
                 LayoutElementRenderElement::SolidColor(elem).into()
             }
+            LayoutElementRenderElement::BackgroundEffect(elem) => {
+                LayoutElementRenderElement::BackgroundEffect(elem).into()
+            }
         };
 
         let downscale = move |elem| {

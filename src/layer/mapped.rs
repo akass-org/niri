@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use niri_config::utils::MergeWith as _;
-use niri_config::{Config, CornerRadius, LayerRule};
+use niri_config::{debug, Config, CornerRadius, LayerRule};
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
@@ -80,6 +80,9 @@ impl MappedLayer {
         shadow_config.on = false;
         shadow_config.merge_with(&rules.shadow);
 
+        let mut background_effect = BackgroundEffect::new();
+        background_effect.update_config(config.blur);
+
         Self {
             surface,
             rules,
@@ -87,7 +90,7 @@ impl MappedLayer {
             view_size,
             scale,
             shadow: Shadow::new(shadow_config),
-            background_effect: BackgroundEffect::new(),
+            background_effect,
             clock,
         }
     }
@@ -308,6 +311,7 @@ impl MappedLayer {
                     zoom,
                     scale: self.scale,
                     alpha_tex,
+                    ignore_alpha: self.rules.background_effect.ignore_alpha.unwrap_or(0.) as f32,
                 };
                 self.background_effect
                     .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));
@@ -317,7 +321,7 @@ impl MappedLayer {
 
     pub fn render_popups<R: NiriRenderer>(
         &self,
-        ctx: RenderCtx<R>,
+        mut ctx: RenderCtx<R>,
         location: Point<f64, Logical>,
         push: &mut dyn FnMut(LayerSurfaceRenderElement<R>),
     ) {
@@ -346,6 +350,94 @@ impl MappedLayer {
                 Kind::ScanoutCandidate,
                 &mut |elem| push(elem.into()),
             );
+
+            if self.background_effect.is_visible() {
+                let area = Rectangle::new(location, self.block_out_buffer.size());
+                // Effects not requested by the surface itself are drawn to match the geometry.
+                let mut clip = true;
+
+                // FIXME: support blur regions on subsurfaces in addition to the main surface.
+                let mut subregion = None;
+                let blur_geometry = if let Some(rects) = self.blur_region() {
+                    if rects.is_empty() {
+                        // Surface has a set, but empty blur region.
+                        None
+                    } else {
+                        // If the surface itself requests the effects, apply different defaults.
+                        clip = false;
+
+                        // Use geometry-shaped blur for blocked-out layers to avoid unintentionally
+                        // leaking any surface shapes. We render those layers as geometry-shaped solid
+                        // rectangles anyway.
+                        if ctx.target.should_block_out(self.rules.block_out_from) {
+                            clip = true;
+                            Some(area)
+                        } else {
+                            let mut main_surface_geo = popup.geometry().to_f64();
+                            main_surface_geo.loc += area.loc;
+
+                            subregion = Some(background_effect::EffectSubregion {
+                                rects,
+                                scale: Scale::from(1.),
+                                offset: main_surface_geo.loc,
+                            });
+
+                            main_surface_geo = main_surface_geo
+                                .to_physical_precise_round(self.scale)
+                                .to_logical(self.scale);
+                            Some(main_surface_geo)
+                        }
+                    }
+                } else {
+                    Some(area)
+                };
+
+                debug!("rendering background effect for popup ");
+                if let Some(geometry) = blur_geometry {
+                    debug!("rendering background effect for popup at geometry {geometry:?} with offset {offset:?}");
+                    let gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> =
+                        Some(render_elements_from_surface_tree(
+                            ctx.renderer.as_gles_renderer(),
+                            popup.wl_surface(),
+                            (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
+                            scale,
+                            alpha,
+                            Kind::ScanoutCandidate,
+                        ));
+
+                    // TODO: respect sync point?
+                    let alpha_tex = gles_elems
+                        .and_then(|gles_elems| {
+                            render_to_texture_with_offset(
+                                ctx.renderer.as_gles_renderer(),
+                                popup.geometry().size.to_physical_precise_round(scale),
+                                self.scale.into(),
+                                Transform::Normal,
+                                Fourcc::Abgr8888,
+                                gles_elems.into_iter(),
+                                (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
+                            )
+                            .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
+                            .ok()
+                        })
+                        .map(|r| r.0);
+
+                    // pos_in_backdrop += (geometry.loc - area.loc).upscale(zoom);
+                    let params = background_effect::RenderParams {
+                        geometry,
+                        subregion,
+                        clip: clip.then_some((area, CornerRadius::default())),
+                        pos_in_backdrop: (buf_pos + offset.to_f64()),
+                        zoom: 1.,
+                        scale: self.scale,
+                        alpha_tex,
+                        ignore_alpha: self.rules.background_effect.ignore_alpha.unwrap_or(0.)
+                            as f32,
+                    };
+                    self.background_effect
+                        .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));
+                }
+            }
         }
     }
 

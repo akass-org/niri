@@ -64,6 +64,7 @@ impl FramebufferEffect {
         blur_options: Option<BlurOptions>,
         noise: f32,
         saturation: f32,
+        ignore_alpha: f32,
     ) -> Option<FramebufferEffectElement> {
         let (clip_geo, corner_radius) = params
             .clip
@@ -87,12 +88,11 @@ impl FramebufferEffect {
 
             let inner = if let Some(inner) = &mut *inner {
                 if let Some(blur) = &mut inner.blur {
-                    blur.update_alpha_tex(params.alpha_tex);
+                    blur.update_alpha_tex(params.alpha_tex, ignore_alpha);
                 }
                 inner
             } else {
-                debug!("init blur for framebuffer effect");
-                let blur = Blur::new(renderer, params.alpha_tex);
+                let blur = Blur::new(renderer, params.alpha_tex, ignore_alpha);
                 inner.insert(Inner::new(renderer, blur))
             };
 

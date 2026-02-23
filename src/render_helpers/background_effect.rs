@@ -34,6 +34,7 @@ pub struct Options {
     pub xray: bool,
     pub noise: Option<f64>,
     pub saturation: Option<f64>,
+    pub ignore_alpha: Option<f32>,
 }
 
 impl Options {
@@ -64,6 +65,8 @@ pub struct RenderParams {
     pub scale: f64,
 
     pub alpha_tex: Option<GlesTexture>,
+
+    pub ignore_alpha: f32,
 }
 
 impl RenderParams {
@@ -203,6 +206,7 @@ impl BackgroundEffect {
             xray: effect.xray == Some(true),
             noise: effect.noise,
             saturation: effect.saturation,
+            ignore_alpha: effect.ignore_alpha.map(|x| x as f32),
         };
 
         // If we have some background effect but xray wasn't explicitly set, default it to true
@@ -255,6 +259,10 @@ impl BackgroundEffect {
             1.
         };
         let saturation = self.options.saturation.unwrap_or(saturation) as f32;
+        let ignore_alpha = self
+            .options
+            .ignore_alpha
+            .unwrap_or(self.blur_config.ignore_alpha.0 as f32);
 
         if self.options.xray {
             let Some(xray) = ctx.xray else {
@@ -268,7 +276,14 @@ impl BackgroundEffect {
         } else {
             // Render non-xray effect.
             let elem = &self.nonxray[ctx.target as usize];
-            if let Some(elem) = elem.render(ctx.renderer, params, blur_options, noise, saturation) {
+            if let Some(elem) = elem.render(
+                ctx.renderer,
+                params,
+                blur_options,
+                noise,
+                saturation,
+                ignore_alpha,
+            ) {
                 push(damage.into());
                 push(elem.into());
             }

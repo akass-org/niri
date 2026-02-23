@@ -83,7 +83,12 @@ impl Xray {
 
         let mut background = self.background[ctx.target as usize].borrow_mut();
         let prev = background.commit();
-        if background.prepare(ctx.renderer, blur, params.alpha_tex.clone()) {
+        if background.prepare(
+            ctx.renderer,
+            blur,
+            params.alpha_tex.clone(),
+            params.ignore_alpha,
+        ) {
             if background.commit() != prev {
                 debug!("background damaged");
             }
@@ -160,7 +165,7 @@ impl Xray {
 
         let mut backdrop = self.backdrop[ctx.target as usize].borrow_mut();
         let prev = backdrop.commit();
-        if backdrop.prepare(ctx.renderer, blur, params.alpha_tex) {
+        if backdrop.prepare(ctx.renderer, blur, params.alpha_tex, params.ignore_alpha) {
             if backdrop.commit() != prev {
                 debug!("backdrop damaged");
             }

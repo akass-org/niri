@@ -138,6 +138,7 @@ impl EffectBuffer {
         renderer: &mut GlesRenderer,
         blur: bool,
         alpha_tex: Option<GlesTexture>,
+        ignore_alpha: f32,
     ) -> bool {
         if let Err(err) = self.prepare_offscreen(renderer) {
             warn!("error preparing offscreen: {err:?}");
@@ -145,7 +146,7 @@ impl EffectBuffer {
         };
 
         if blur {
-            if let Err(err) = self.prepare_blur(renderer, alpha_tex) {
+            if let Err(err) = self.prepare_blur(renderer, alpha_tex, ignore_alpha) {
                 warn!("error preparing blur: {err:?}");
                 return false;
             }
@@ -262,6 +263,7 @@ impl EffectBuffer {
         &mut self,
         renderer: &mut GlesRenderer,
         alpha_tex: Option<GlesTexture>,
+        ignore_alpha: f32,
     ) -> anyhow::Result<()> {
         let offscreen = self.offscreen.as_mut().context("missing offscreen")?;
         if offscreen.blurred.is_some() {
@@ -279,7 +281,7 @@ impl EffectBuffer {
         let blur = if let Some(blur) = &mut self.blur {
             blur
         } else {
-            let Some(blur) = Blur::new(renderer, alpha_tex) else {
+            let Some(blur) = Blur::new(renderer, alpha_tex, ignore_alpha) else {
                 // Missing blur shader.
                 return Ok(());
             };

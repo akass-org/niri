@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use crate::niri::OutputRenderElements;
 use niri_config::{Color, Config, CornerRadius, GradientInterpolation, WindowRule};
-use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
+use smithay::backend::renderer::element::surface::{
+    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
+};
 use smithay::backend::renderer::element::utils::RelocateRenderElement;
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::GlesRenderer;
@@ -28,11 +30,12 @@ use wayland_backend::server::Credentials;
 use super::{ResolvedWindowRules, WindowRef};
 use crate::handlers::background_effect::get_cached_blur_region;
 use crate::handlers::KdeDecorationsModeState;
+use crate::layer::mapped::LayerSurfaceRenderElement;
 use crate::layout::{
     ConfigureIntent, InteractiveResizeData, LayoutElement, LayoutElementRenderElement,
     LayoutElementRenderSnapshot, SizingMode,
 };
-use crate::niri_render_elements;
+use crate::render_helpers::background_effect::{self, BackgroundEffect, BackgroundEffectElement};
 use crate::render_helpers::border::BorderRenderElement;
 use crate::render_helpers::offscreen::OffscreenData;
 use crate::render_helpers::renderer::NiriRenderer;
@@ -41,7 +44,7 @@ use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderEleme
 use crate::render_helpers::surface::{
     push_elements_from_surface_tree, render_snapshot_from_surface_tree,
 };
-use crate::render_helpers::{BakedBuffer, RenderCtx, RenderTarget};
+use crate::render_helpers::{render_to_texture_with_offset, BakedBuffer, RenderCtx, RenderTarget};
 use crate::utils::id::IdCounter;
 use crate::utils::transaction::Transaction;
 use crate::utils::{
@@ -49,6 +52,8 @@ use crate::utils::{
     with_toplevel_last_uncommitted_configure, with_toplevel_role, with_toplevel_role_and_current,
     ResizeEdge,
 };
+use crate::{niri_render_elements, render_helpers};
+use smithay::backend::allocator::Fourcc;
 
 #[derive(Debug)]
 pub struct Mapped {
@@ -193,6 +198,8 @@ pub struct Mapped {
 
     /// Most recent monotonic time when the window had the focus.
     focus_timestamp: Option<Duration>,
+
+    background_effect: BackgroundEffect,
 }
 
 niri_render_elements! {
@@ -291,7 +298,10 @@ impl Mapped {
             is_pending_maximized: false,
             uncommitted_maximized: Vec::new(),
             focus_timestamp: None,
+            background_effect: BackgroundEffect::new(),
         };
+
+        rv.background_effect.update_config(config.blur);
 
         rv.is_maximized = rv.sizing_mode().is_maximized();
         rv.is_pending_maximized = rv.pending_sizing_mode().is_maximized();
@@ -660,9 +670,19 @@ impl LayoutElement for Mapped {
         }
     }
 
+    fn update_render_elements(&mut self) {
+        let radius = self.rules.geometry_corner_radius.unwrap_or_default();
+        let has_blur_region = self.blur_region().is_some_and(|r| !r.is_empty());
+        self.background_effect.update_render_elements(
+            radius,
+            self.rules.background_effect,
+            has_blur_region,
+        );
+    }
+
     fn render_popups<R: NiriRenderer>(
         &self,
-        ctx: RenderCtx<R>,
+        mut ctx: RenderCtx<R>,
         location: Point<f64, Logical>,
         scale: Scale<f64>,
         alpha: f32,
@@ -674,10 +694,10 @@ impl LayoutElement for Mapped {
 
         let buf_pos = location - self.window.geometry().loc.to_f64();
         let surface = self.toplevel().wl_surface();
-        let mut push = |elem: WaylandSurfaceRenderElement<R>| push(elem.into());
         for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
             let offset = self.window.geometry().loc + popup_offset - popup.geometry().loc;
 
+            let mut push_mut = |elem: WaylandSurfaceRenderElement<R>| push(elem.into());
             push_elements_from_surface_tree(
                 ctx.renderer,
                 popup.wl_surface(),
@@ -685,8 +705,82 @@ impl LayoutElement for Mapped {
                 scale,
                 alpha,
                 Kind::ScanoutCandidate,
-                &mut push,
+                &mut push_mut,
             );
+
+            if self.background_effect.is_visible() {
+                let area = Rectangle::new(location, self.block_out_buffer.borrow().size());
+                let mut main_surface_geo = popup.geometry().to_f64();
+                main_surface_geo.loc = buf_pos + offset.to_f64();
+
+                // FIXME: support blur regions on subsurfaces in addition to the main surface.
+                let mut subregion = None;
+                let blur_geometry = if let Some(rects) = self.blur_region() {
+                    if rects.is_empty() {
+                        // Surface has a set, but empty blur region.
+                        None
+                    } else {
+                        // If the surface itself requests the effects, apply different defaults.
+
+                        subregion = Some(render_helpers::background_effect::EffectSubregion {
+                            rects,
+                            scale: Scale::from(1.),
+                            offset: main_surface_geo.loc,
+                        });
+
+                        main_surface_geo = main_surface_geo
+                            .to_physical_precise_round(scale)
+                            .to_logical(scale);
+                        Some(main_surface_geo)
+                    }
+                } else {
+                    Some(main_surface_geo)
+                };
+
+                if let Some(geometry) = blur_geometry {
+                    let gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> =
+                        Some(render_elements_from_surface_tree(
+                            ctx.renderer.as_gles_renderer(),
+                            popup.wl_surface(),
+                            (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
+                            scale,
+                            alpha,
+                            Kind::ScanoutCandidate,
+                        ));
+
+                    // TODO: respect sync point?
+                    let alpha_tex = gles_elems
+                        .and_then(|gles_elems| {
+                            render_to_texture_with_offset(
+                                ctx.renderer.as_gles_renderer(),
+                                popup.geometry().size.to_physical_precise_round(scale),
+                                scale.into(),
+                                Transform::Normal,
+                                Fourcc::Abgr8888,
+                                gles_elems.into_iter(),
+                                (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
+                            )
+                            .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
+                            .ok()
+                        })
+                        .map(|r| r.0);
+
+                    // pos_in_backdrop += (geometry.loc - area.loc).upscale(zoom);
+                    let params = background_effect::RenderParams {
+                        geometry,
+                        subregion,
+                        clip: Some((area, CornerRadius::default())),
+                        pos_in_backdrop: (buf_pos + offset.to_f64()),
+                        zoom: 1.,
+                        scale: scale.x,
+                        alpha_tex,
+                        ignore_alpha: self.rules.background_effect.ignore_alpha.unwrap_or(0.)
+                            as f32,
+                    };
+                    self.background_effect
+                        .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));
+                }
+            }
         }
     }
 

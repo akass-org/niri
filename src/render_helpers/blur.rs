@@ -24,6 +24,8 @@ pub struct Blur {
     textures: Vec<GlesTexture>,
 
     alpha_tex: Option<GlesTexture>,
+
+    ignore_alpha: f32,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -137,18 +139,24 @@ impl BlurProgram {
 }
 
 impl Blur {
-    pub fn new(renderer: &mut GlesRenderer, alpha_tex: Option<GlesTexture>) -> Option<Self> {
+    pub fn new(
+        renderer: &mut GlesRenderer,
+        alpha_tex: Option<GlesTexture>,
+        ignore_alpha: f32,
+    ) -> Option<Self> {
         let program = Shaders::get(renderer).blur.clone()?;
         Some(Self {
             program,
             renderer_context_id: renderer.context_id(),
             textures: Vec::new(),
             alpha_tex,
+            ignore_alpha,
         })
     }
 
-    pub fn update_alpha_tex(&mut self, alpha_tex: Option<GlesTexture>) {
+    pub fn update_alpha_tex(&mut self, alpha_tex: Option<GlesTexture>, ignore_alpha: f32) {
         self.alpha_tex = alpha_tex;
+        self.ignore_alpha = ignore_alpha;
     }
 
     pub fn context_id(&self) -> ContextId<GlesTexture> {
@@ -402,7 +410,7 @@ impl Blur {
             gl.UseProgram(program.program);
             gl.ActiveTexture(ffi::TEXTURE0);
             gl.Uniform1i(program.uniform_tex, 0);
-            gl.Uniform1f(program.uniform_ignore_alpha, 0.1 as f32);
+            gl.Uniform1f(program.uniform_ignore_alpha, self.ignore_alpha);
             gl.Uniform1i(program.uniform_alpha_tex, if has_alpha_tex { 1 } else { 0 });
 
             let vertices: [f32; 12] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0];

@@ -473,6 +473,8 @@ impl<W: LayoutElement> Tile<W> {
     }
 
     pub fn update_render_elements(&mut self, is_active: bool, view_rect: Rectangle<f64, Logical>) {
+        self.window.update_render_elements();
+
         let rules = self.window.rules();
         let animated_tile_size = self.animated_tile_size();
         let expanded_progress = self.expanded_progress();
@@ -1254,6 +1256,9 @@ impl<W: LayoutElement> Tile<W> {
                     // Otherwise, render the solid color as is.
                     LayoutElementRenderElement::SolidColor(elem).into()
                 }
+                LayoutElementRenderElement::BackgroundEffect(elem) => {
+                    LayoutElementRenderElement::BackgroundEffect(elem).into()
+                }
             };
 
             if clip_to_geometry && clip_shader.is_some() {
@@ -1384,6 +1389,7 @@ impl<W: LayoutElement> Tile<W> {
                     zoom,
                     scale: self.scale,
                     alpha_tex: None,
+                    ignore_alpha: 0.,
                 };
                 self.background_effect
                     .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));

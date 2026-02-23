@@ -1156,6 +1156,8 @@ pub struct BackgroundEffectRule {
     pub noise: Option<FloatOrInt<0, 1000>>,
     #[knuffel(child, unwrap(argument))]
     pub saturation: Option<FloatOrInt<0, 1000>>,
+    #[knuffel(child, unwrap(argument))]
+    pub ignore_alpha: Option<FloatOrInt<0, 1>>,
 }
 
 impl MergeWith<Self> for BackgroundEffectRule {
@@ -1184,6 +1186,7 @@ pub struct BackgroundEffect {
 
     pub noise: Option<f64>,
     pub saturation: Option<f64>,
+    pub ignore_alpha: Option<f64>,
 }
 
 impl MergeWith<BackgroundEffectRule> for BackgroundEffect {
@@ -1196,6 +1199,10 @@ impl MergeWith<BackgroundEffectRule> for BackgroundEffect {
 
         if let Some(x) = part.saturation {
             self.saturation = Some(x.0);
+        }
+
+        if let Some(x) = part.ignore_alpha {
+            self.ignore_alpha = Some(x.0);
         }
     }
 }
