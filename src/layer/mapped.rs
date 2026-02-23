@@ -237,6 +237,7 @@ impl MappedLayer {
             let area = Rectangle::new(location, self.block_out_buffer.size());
             // Effects not requested by the surface itself are drawn to match the geometry.
             let mut clip = true;
+            let mut need_ignore_alpha = true;
 
             // FIXME: support blur regions on subsurfaces in addition to the main surface.
             let mut subregion = None;
@@ -245,9 +246,7 @@ impl MappedLayer {
                     // Surface has a set, but empty blur region.
                     None
                 } else {
-                    debug!(
-                        "rendering background effect for layer surface with blur region {rects:?}"
-                    );
+                    need_ignore_alpha = false;
                     // If the surface itself requests the effects, apply different defaults.
                     clip = false;
 
@@ -286,34 +285,37 @@ impl MappedLayer {
             };
 
             if let Some(geometry) = blur_geometry {
-                let gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> =
-                    Some(render_elements_from_surface_tree(
-                        ctx.renderer.as_gles_renderer(),
-                        self.surface.wl_surface(),
-                        location.to_physical_precise_round(scale),
-                        scale,
-                        alpha,
-                        Kind::ScanoutCandidate,
-                    ));
-
-                // TODO: respect sync point?
-                let alpha_tex = gles_elems
-                    .and_then(|gles_elems| {
-                        render_to_texture_with_offset(
+                let mut alpha_tex = None;
+                if need_ignore_alpha {
+                    let gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> =
+                        Some(render_elements_from_surface_tree(
                             ctx.renderer.as_gles_renderer(),
-                            self.main_surface_geo()
-                                .size
-                                .to_physical_precise_round(scale),
-                            self.scale.into(),
-                            Transform::Normal,
-                            Fourcc::Abgr8888,
-                            gles_elems.into_iter(),
-                            geometry.loc.to_physical_precise_round(self.scale),
-                        )
-                        .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
-                        .ok()
-                    })
-                    .map(|r| r.0);
+                            self.surface.wl_surface(),
+                            location.to_physical_precise_round(scale),
+                            scale,
+                            alpha,
+                            Kind::ScanoutCandidate,
+                        ));
+
+                    // TODO: respect sync point?
+                    alpha_tex = gles_elems
+                        .and_then(|gles_elems| {
+                            render_to_texture_with_offset(
+                                ctx.renderer.as_gles_renderer(),
+                                self.main_surface_geo()
+                                    .size
+                                    .to_physical_precise_round(scale),
+                                self.scale.into(),
+                                Transform::Normal,
+                                Fourcc::Abgr8888,
+                                gles_elems.into_iter(),
+                                geometry.loc.to_physical_precise_round(self.scale),
+                            )
+                            .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
+                            .ok()
+                        })
+                        .map(|r| r.0);
+                }
 
                 pos_in_backdrop += (geometry.loc - area.loc).upscale(zoom);
                 let params = background_effect::RenderParams {
@@ -369,6 +371,7 @@ impl MappedLayer {
                 let area = Rectangle::new(location, self.block_out_buffer.size());
                 // Effects not requested by the surface itself are drawn to match the geometry.
                 let mut clip = true;
+                let mut need_ignore_alpha = true;
 
                 // FIXME: support blur regions on subsurfaces in addition to the main surface.
                 let mut subregion = None;
@@ -379,6 +382,7 @@ impl MappedLayer {
                     } else {
                         // If the surface itself requests the effects, apply different defaults.
                         clip = false;
+                        need_ignore_alpha = false;
 
                         // Use geometry-shaped blur for blocked-out layers to avoid unintentionally
                         // leaking any surface shapes. We render those layers as geometry-shaped solid
@@ -416,33 +420,35 @@ impl MappedLayer {
 
                 debug!("rendering background effect for popup ");
                 if let Some(geometry) = blur_geometry {
-                    debug!("rendering background effect for popup at geometry {geometry:?} with offset {offset:?}");
-                    let gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> =
-                        Some(render_elements_from_surface_tree(
-                            ctx.renderer.as_gles_renderer(),
-                            popup.wl_surface(),
-                            (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
-                            scale,
-                            alpha,
-                            Kind::ScanoutCandidate,
-                        ));
-
-                    // TODO: respect sync point?
-                    let alpha_tex = gles_elems
-                        .and_then(|gles_elems| {
-                            render_to_texture_with_offset(
+                    let mut alpha_tex = None;
+                    if need_ignore_alpha {
+                        let gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> =
+                            Some(render_elements_from_surface_tree(
                                 ctx.renderer.as_gles_renderer(),
-                                popup.geometry().size.to_physical_precise_round(scale),
-                                self.scale.into(),
-                                Transform::Normal,
-                                Fourcc::Abgr8888,
-                                gles_elems.into_iter(),
+                                popup.wl_surface(),
                                 (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
-                            )
-                            .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
-                            .ok()
-                        })
-                        .map(|r| r.0);
+                                scale,
+                                alpha,
+                                Kind::ScanoutCandidate,
+                            ));
+
+                        // TODO: respect sync point?
+                        alpha_tex = gles_elems
+                            .and_then(|gles_elems| {
+                                render_to_texture_with_offset(
+                                    ctx.renderer.as_gles_renderer(),
+                                    popup.geometry().size.to_physical_precise_round(scale),
+                                    self.scale.into(),
+                                    Transform::Normal,
+                                    Fourcc::Abgr8888,
+                                    gles_elems.into_iter(),
+                                    (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
+                                )
+                                .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
+                                .ok()
+                            })
+                            .map(|r| r.0);
+                    }
 
                     // pos_in_backdrop += (geometry.loc - area.loc).upscale(zoom);
                     let params = background_effect::RenderParams {

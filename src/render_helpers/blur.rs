@@ -395,49 +395,47 @@ impl Blur {
 
             //finish
 
-            let program = &self.program.0.finish;
-
-            let mut has_alpha_tex = false;
             if let Some(alpha_tex) = self.alpha_tex.clone() {
                 gl.ActiveTexture(ffi::TEXTURE1);
                 gl.BindTexture(ffi::TEXTURE_2D, alpha_tex.tex_id());
                 gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
                 gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
-                has_alpha_tex = true;
+
+                let program = &self.program.0.finish;
+                gl.UseProgram(program.program);
+                gl.ActiveTexture(ffi::TEXTURE0);
+                gl.Uniform1i(program.uniform_tex, 0);
+                gl.Uniform1f(program.uniform_ignore_alpha, self.ignore_alpha);
+                gl.Uniform1i(program.uniform_alpha_tex, 1);
+
+                let vertices: [f32; 12] =
+                    [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0];
+
+                let mut vbo = 0;
+                gl.GenBuffers(1, &mut vbo);
+                gl.BindBuffer(ffi::ARRAY_BUFFER, vbo);
+                gl.BufferData(
+                    ffi::ARRAY_BUFFER,
+                    (vertices.len() * std::mem::size_of::<f32>()) as isize,
+                    vertices.as_ptr().cast(),
+                    ffi::STREAM_DRAW,
+                );
+
+                gl.EnableVertexAttribArray(program.attrib_vert as u32);
+                gl.VertexAttribPointer(
+                    program.attrib_vert as u32,
+                    2,
+                    ffi::FLOAT,
+                    ffi::FALSE,
+                    0,
+                    std::ptr::null(),
+                );
+
+                gl.DrawArrays(ffi::TRIANGLES, 0, 6);
+                gl.DisableVertexAttribArray(program.attrib_vert as u32);
+
+                //finish end
             }
-
-            gl.UseProgram(program.program);
-            gl.ActiveTexture(ffi::TEXTURE0);
-            gl.Uniform1i(program.uniform_tex, 0);
-            gl.Uniform1f(program.uniform_ignore_alpha, self.ignore_alpha);
-            gl.Uniform1i(program.uniform_alpha_tex, if has_alpha_tex { 1 } else { 0 });
-
-            let vertices: [f32; 12] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0];
-
-            let mut vbo = 0;
-            gl.GenBuffers(1, &mut vbo);
-            gl.BindBuffer(ffi::ARRAY_BUFFER, vbo);
-            gl.BufferData(
-                ffi::ARRAY_BUFFER,
-                (vertices.len() * std::mem::size_of::<f32>()) as isize,
-                vertices.as_ptr().cast(),
-                ffi::STREAM_DRAW,
-            );
-
-            gl.EnableVertexAttribArray(program.attrib_vert as u32);
-            gl.VertexAttribPointer(
-                program.attrib_vert as u32,
-                2,
-                ffi::FLOAT,
-                ffi::FALSE,
-                0,
-                std::ptr::null(),
-            );
-
-            gl.DrawArrays(ffi::TRIANGLES, 0, 6);
-            gl.DisableVertexAttribArray(program.attrib_vert as u32);
-
-            //finish end
 
             gl.BindFramebuffer(ffi::FRAMEBUFFER, 0);
             gl.DeleteFramebuffers(fbos.len() as _, fbos.as_ptr());
