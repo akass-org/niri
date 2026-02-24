@@ -12,7 +12,9 @@ Focus ring and border can also cover the background effect, see [this FAQ entry]
 ### Blur
 
 Windows and layer surfaces can request their background to be blurred via the [`ext-background-effect` protocol](https://wayland.app/protocols/ext-background-effect-v1).
-You can also enable blur manually with the `blur true` background effect window rule.
+In this case, the application will usually offer some "background blur" setting that you'll need to enable in its configuration.
+
+You can also enable blur on the niri side with the `blur true` background effect window rule:
 
 ```kdl
 // Enable blur behind the foot terminal.
@@ -63,8 +65,3 @@ Fixing this requries subframe support in the Smithay rendering code.
 You can see this if you enable non-xray effects on a bottom or background layer surface, then open the [Overview](./Overview.md).
 Bottom and background layer surfaces are cloned on all workspaces that you can see in the Overview, causing interference.
 Fixing this requires support for framebuffer effect clones in the Smithay rendering code.
-
-- Non-xray blur "fades out" near the very edges of a monitor.
-This happens because when we copy the framebuffer contents with `glBlitFramebuffer()`, it skips pixels outside the monitor bounds.
-I'm not actually sure why, since the documentation indicates it should clamp the pixel values to edge in this case.
-If we get this working, blur "fading out" would be fixed.

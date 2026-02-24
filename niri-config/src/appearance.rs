@@ -320,7 +320,7 @@ pub struct Blur {
     pub noise: f64,
     pub saturation: f64,
     pub ignore_alpha: FloatOrInt<0, 1>,
-    pub blur_when_keyboard_focused: bool,
+    // pub blur_when_keyboard_focused: bool,
 }
 
 #[derive(knuffel::Decode, Debug, Default, Clone, Copy, PartialEq)]
@@ -339,8 +339,8 @@ pub struct BlurPart {
     pub saturation: Option<FloatOrInt<0, 1000>>,
     #[knuffel(child, unwrap(argument))]
     pub ignore_alpha: Option<FloatOrInt<0, 1>>,
-    #[knuffel(child, unwrap(argument))]
-    pub blur_when_keyboard_focused: Option<bool>,
+    // #[knuffel(child, unwrap(argument))]
+    // pub blur_when_keyboard_focused: Option<bool>,
 }
 
 impl Default for Blur {
@@ -351,7 +351,7 @@ impl Default for Blur {
             offset: 3.,
             noise: 0.02,
             ignore_alpha: FloatOrInt(0.),
-            blur_when_keyboard_focused: false,
+            // blur_when_keyboard_focused: false,
             saturation: 1.5,
         }
     }
@@ -368,7 +368,7 @@ impl MergeWith<BlurPart> for Blur {
             (self, part),
             ignore_alpha,
             passes,
-            blur_when_keyboard_focused
+            // blur_when_keyboard_focused
         );
 
         merge!((self, part), offset, noise, saturation);
