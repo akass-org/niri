@@ -28,6 +28,7 @@ use crate::render_helpers::{
 use crate::utils::{baba_is_float_offset, round_logical_in_physical};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::gles::GlesRenderer;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 
 #[derive(Debug)]
 pub struct MappedLayer {
@@ -200,7 +201,8 @@ impl MappedLayer {
         pos_in_backdrop += self.bob_offset().upscale(zoom);
 
         if ctx.target.should_block_out(self.rules.block_out_from) {
-            if let Some(false) = self.rules.transparent_block {
+            if let Some(true) = self.rules.transparent_block {
+            } else {
                 // Round to physical pixels.
                 let location = location.to_physical_precise_round(scale).to_logical(scale);
 
@@ -242,6 +244,7 @@ impl MappedLayer {
             // FIXME: support blur regions on subsurfaces in addition to the main surface.
             let mut subregion = None;
             let blur_geometry = if let Some(rects) = self.blur_region() {
+                debug!("using surface-provided blur region for normal layer-surface {rects:?}");
                 if rects.is_empty() {
                     // Surface has a set, but empty blur region.
                     None
@@ -249,6 +252,7 @@ impl MappedLayer {
                     need_ignore_alpha = false;
                     // If the surface itself requests the effects, apply different defaults.
                     clip = false;
+                    debug!("using surface-provided blur region for normal layer-surface");
 
                     // Use geometry-shaped blur for blocked-out layers to avoid unintentionally
                     // leaking any surface shapes. We render those layers as geometry-shaped solid
@@ -277,7 +281,12 @@ impl MappedLayer {
                     }
                 }
             } else {
-                if self.rules.transparent_block.is_some() {
+                if ctx.target.should_block_out(self.rules.block_out_from)
+                    && self
+                        .rules
+                        .transparent_block
+                        .is_some_and(|transparent_block| transparent_block == true)
+                {
                     None
                 } else {
                     Some(area)
@@ -328,6 +337,7 @@ impl MappedLayer {
                     alpha_tex,
                     ignore_alpha: self.rules.background_effect.ignore_alpha.unwrap_or(0.) as f32,
                     exponent: self.rules.exponent.unwrap_or(2.8) as f32,
+                    offset: (0., 0.),
                 };
                 self.background_effect
                     .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));
@@ -375,48 +385,56 @@ impl MappedLayer {
 
                 // FIXME: support blur regions on subsurfaces in addition to the main surface.
                 let mut subregion = None;
-                let blur_geometry = if let Some(rects) = self.blur_region() {
-                    if rects.is_empty() {
-                        // Surface has a set, but empty blur region.
-                        None
-                    } else {
-                        // If the surface itself requests the effects, apply different defaults.
-                        clip = false;
-                        need_ignore_alpha = false;
-
-                        // Use geometry-shaped blur for blocked-out layers to avoid unintentionally
-                        // leaking any surface shapes. We render those layers as geometry-shaped solid
-                        // rectangles anyway.
-                        if ctx.target.should_block_out(self.rules.block_out_from) {
-                            if self.rules.transparent_block.is_some() {
-                                None
-                            } else {
-                                clip = true;
-                                Some(area)
-                            }
+                let blur_geometry =
+                    if let Some(rects) = self.blur_region_surface(popup.wl_surface()) {
+                        debug!("using surface-provided blur region for popup {rects:?}");
+                        if rects.is_empty() {
+                            // Surface has a set, but empty blur region.
+                            None
                         } else {
-                            let mut main_surface_geo = popup.geometry().to_f64();
-                            main_surface_geo.loc += area.loc;
+                            // If the surface itself requests the effects, apply different defaults.
+                            clip = false;
+                            need_ignore_alpha = false;
 
-                            subregion = Some(background_effect::EffectSubregion {
-                                rects,
-                                scale: Scale::from(1.),
-                                offset: main_surface_geo.loc,
-                            });
+                            // Use geometry-shaped blur for blocked-out layers to avoid unintentionally
+                            // leaking any surface shapes. We render those layers as geometry-shaped solid
+                            // rectangles anyway.
+                            if ctx.target.should_block_out(self.rules.block_out_from) {
+                                if self.rules.transparent_block.is_some() {
+                                    None
+                                } else {
+                                    clip = true;
+                                    Some(area)
+                                }
+                            } else {
+                                let mut main_surface_geo = popup.geometry().to_f64();
+                                main_surface_geo.loc += area.loc;
 
-                            main_surface_geo = main_surface_geo
-                                .to_physical_precise_round(self.scale)
-                                .to_logical(self.scale);
-                            Some(main_surface_geo)
+                                subregion = Some(background_effect::EffectSubregion {
+                                    rects,
+                                    scale: Scale::from(1.),
+                                    offset: main_surface_geo.loc,
+                                });
+
+                                main_surface_geo = main_surface_geo
+                                    .to_physical_precise_round(Scale::from(scale))
+                                    .to_logical(Scale::from(scale));
+                                Some(main_surface_geo)
+                            }
                         }
-                    }
-                } else {
-                    if self.rules.transparent_block.is_some() {
-                        None
                     } else {
-                        Some(area)
-                    }
-                };
+                        if ctx.target.should_block_out(self.rules.block_out_from)
+                            && self
+                                .rules
+                                .transparent_block
+                                .is_some_and(|transparent_block| transparent_block == true)
+                        {
+                            None
+                        } else {
+                            debug!("not using surface-provided blur region for popup {area:?}");
+                            Some(area)
+                        }
+                    };
 
                 debug!("rendering background effect for popup ");
                 if let Some(geometry) = blur_geometry {
@@ -462,6 +480,7 @@ impl MappedLayer {
                         ignore_alpha: self.rules.background_effect.ignore_alpha.unwrap_or(0.)
                             as f32,
                         exponent: self.rules.exponent.unwrap_or(2.8) as f32,
+                        offset: (0., 0.),
                     };
                     self.background_effect
                         .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));
@@ -484,5 +503,12 @@ impl MappedLayer {
 
     fn blur_region(&self) -> Option<Arc<Vec<Rectangle<i32, Logical>>>> {
         with_states(self.surface.wl_surface(), get_cached_blur_region)
+    }
+
+    fn blur_region_surface(
+        &self,
+        wl_surface: &WlSurface,
+    ) -> Option<Arc<Vec<Rectangle<i32, Logical>>>> {
+        with_states(wl_surface, get_cached_blur_region)
     }
 }

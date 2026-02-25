@@ -102,6 +102,7 @@ unsafe fn compile_finish_program(gl: &ffi::Gles2) -> Result<BlurFinish, GlesErro
     let alpha_tex = c"alpha_tex";
     let ignore_alpha = c"ignore_alpha";
     // let geo = c"geo";
+    let offset = c"offset";
 
     Ok(BlurFinish {
         program,

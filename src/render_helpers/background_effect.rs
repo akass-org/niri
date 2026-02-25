@@ -69,6 +69,8 @@ pub struct RenderParams {
     pub ignore_alpha: f32,
 
     pub exponent: f32,
+
+    pub offset: (f32, f32),
 }
 
 impl RenderParams {

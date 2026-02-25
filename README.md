@@ -18,40 +18,37 @@ window-rule {
 
 ### blur
 
-> 为了优化性能，blur 窗口根据 window-rule 的 opacity 判断，不透明的窗口不受 blur 影响。软件自己的透明度设置无法影响 blur 条件判断，如果想要用软件自己的透明度，建议设置 opacity 小于 1（可以是0.999）
->
-> blur passes 上限 8
-
-popup blur 与 layout blur 同步，也可以单独添加 window rule，layer blur 需要在 layer rule 主动添加 blur 配置块（防止 layer 面积过大导致 blur 后看不见操作画面）。
+包括窗口模糊，layer 模糊，弹窗模糊
 
 例：
 
 ```
-layout {
-    blur {
-        on
-        passes 1
-        radius 4
-        noise 2.0 // 噪点
-        ignore-alpha 0.1 // 透明度剔除
-    }
+blur {
+    passes 4
+    radius 2
+    noise 0.1 // 噪点
+    ignore-alpha 0.1 // 透明度剔除
+    saturation 1.0 // 饱和度
 }
 
 window-rule{
     match app-id="appid"
-    blur {
-        off
+    background-effect{
+        xray false // false 为实时模糊
+        blur true
+        noise 0.1 // 噪点
+        ignore-alpha 0.1 // 透明度剔除
+        saturation 1.0 // 饱和度
     }
 }
 
 layer-rule{
-    blur {
-        on
-        passes 1
-        radius 4
-        noise 2.0 // 噪点
+    background-effect{
+        xray false
+        blur true
+        noise 0.1 // 噪点
         ignore-alpha 0.1 // 透明度剔除
-        blur-when-keyboard-focused true // 只在键盘聚焦时进行模糊
+        saturation 1.0 // 饱和度
     }
 }
 ```
@@ -59,20 +56,23 @@ layer-rule{
 **建议 blur 规则**
 
 ```
-layer-rule{
-    match namespace="dms:spotlight"
-    blur {
-        blur-when-keyboard-focused true
-    }
-}
 
 layer-rule{
-    match namespace="selection" // slurp
+    match namespace="gtk4-layer-shell"
+    match namespace="selection"
     match namespace="swww-daemon"
     match namespace="linux-wallpaperengine"
     match namespace="dms:control-center:background"
-    blur {
-        off
+    match namespace="noctalia-bar-exclusion*"
+    match namespace="noctalia-bar-content*"
+    match namespace="noctalia-image-cache-renderer*"
+    match namespace="noctalia-dock-peek*"
+    match namespace="dms:dash:background"
+    match namespace="dms:control-center:background"
+    match namespace="dms:plugins:plugin:background"
+
+    background-effect{
+        blur false
     }
 }
 ```

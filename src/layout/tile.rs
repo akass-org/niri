@@ -1380,7 +1380,11 @@ impl<W: LayoutElement> Tile<W> {
                     }
                 }
             } else {
-                if rules.transparent_block.is_some() {
+                if ctx.target.should_block_out(rules.block_out_from)
+                    && rules
+                        .transparent_block
+                        .is_some_and(|transparent_block| transparent_block == true)
+                {
                     None
                 } else {
                     Some(area)
@@ -1399,6 +1403,7 @@ impl<W: LayoutElement> Tile<W> {
                     alpha_tex: None,
                     ignore_alpha: 0.,
                     exponent,
+                    offset: (0., 0.),
                 };
                 self.background_effect
                     .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));
