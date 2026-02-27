@@ -36,7 +36,6 @@ use crate::utils::transaction::Transaction;
 use crate::utils::{
     baba_is_float_offset, round_logical_in_physical, round_logical_in_physical_max1,
 };
-use std::cell::RefCell;
 
 /// Toplevel window with decorations.
 #[derive(Debug)]
@@ -488,6 +487,7 @@ impl<W: LayoutElement> Tile<W> {
             radius,
             rules.background_effect,
             has_blur_region,
+            false,
         );
 
         let draw_border_with_background = rules

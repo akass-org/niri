@@ -679,6 +679,7 @@ impl LayoutElement for Mapped {
             radius,
             self.rules.background_effect,
             has_blur_region,
+            false,
         );
     }
 
@@ -756,7 +757,7 @@ impl LayoutElement for Mapped {
 
                 if let Some(geometry) = blur_geometry {
                     let mut alpha_tex = None;
-                    if need_ignore_alpha {
+                    if need_ignore_alpha && geometry.size.w > 0. && geometry.size.h > 0. {
                         let gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> =
                             Some(render_elements_from_surface_tree(
                                 ctx.renderer.as_gles_renderer(),

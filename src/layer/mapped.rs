@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use niri_config::utils::MergeWith as _;
-use niri_config::{debug, Config, CornerRadius, LayerRule};
+use niri_config::{Config, CornerRadius, LayerRule};
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
@@ -22,13 +22,12 @@ use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::shadow::ShadowRenderElement;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::surface::push_elements_from_surface_tree;
-use crate::render_helpers::{
-    background_effect, render_to_texture, render_to_texture_with_offset, RenderCtx,
-};
+use crate::render_helpers::{background_effect, render_to_texture_with_offset, RenderCtx};
 use crate::utils::{baba_is_float_offset, round_logical_in_physical};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use std::cell::Cell;
 
 #[derive(Debug)]
 pub struct MappedLayer {
@@ -55,6 +54,8 @@ pub struct MappedLayer {
 
     /// Clock for driving animations.
     clock: Clock,
+
+    force_damage: Cell<bool>,
 }
 
 niri_render_elements! {
@@ -93,6 +94,7 @@ impl MappedLayer {
             shadow: Shadow::new(shadow_config),
             background_effect,
             clock,
+            force_damage: Cell::new(false),
         }
     }
 
@@ -134,6 +136,7 @@ impl MappedLayer {
             radius,
             self.rules.background_effect,
             has_blur_region,
+            self.force_damage.get(),
         );
     }
 
@@ -295,7 +298,9 @@ impl MappedLayer {
 
             if let Some(geometry) = blur_geometry {
                 let mut alpha_tex = None;
-                if need_ignore_alpha {
+                if need_ignore_alpha && geometry.size.w > 0. && geometry.size.h > 0. {
+                    self.force_damage.set(true);
+                    // debug!("surface size {:?}", self.surface.);
                     let gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> =
                         Some(render_elements_from_surface_tree(
                             ctx.renderer.as_gles_renderer(),
@@ -305,7 +310,6 @@ impl MappedLayer {
                             alpha,
                             Kind::ScanoutCandidate,
                         ));
-
                     // TODO: respect sync point?
                     alpha_tex = gles_elems
                         .and_then(|gles_elems| {
@@ -324,6 +328,8 @@ impl MappedLayer {
                             .ok()
                         })
                         .map(|r| r.0);
+                } else {
+                    self.force_damage.set(false);
                 }
 
                 pos_in_backdrop += (geometry.loc - area.loc).upscale(zoom);
@@ -439,7 +445,7 @@ impl MappedLayer {
                 debug!("rendering background effect for popup ");
                 if let Some(geometry) = blur_geometry {
                     let mut alpha_tex = None;
-                    if need_ignore_alpha {
+                    if need_ignore_alpha && geometry.size.w > 0. && geometry.size.h > 0. {
                         let gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> =
                             Some(render_elements_from_surface_tree(
                                 ctx.renderer.as_gles_renderer(),
