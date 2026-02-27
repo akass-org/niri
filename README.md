@@ -18,6 +18,9 @@ window-rule {
 
 ### blur
 
+> 如果弹窗背景没有任何更新，则会出现无法 blur 的情况，暂时不知道怎么修
+> 该功能补全（弹窗模糊，透明剔除）仅对实时模糊（xray false）有效
+
 包括窗口模糊，layer 模糊，弹窗模糊
 
 例：
@@ -62,14 +65,11 @@ layer-rule{
     match namespace="selection"
     match namespace="swww-daemon"
     match namespace="linux-wallpaperengine"
-    match namespace="dms:control-center:background"
     match namespace="noctalia-bar-exclusion*"
     match namespace="noctalia-bar-content*"
     match namespace="noctalia-image-cache-renderer*"
     match namespace="noctalia-dock-peek*"
-    match namespace="dms:dash:background"
-    match namespace="dms:control-center:background"
-    match namespace="dms:plugins:plugin:background"
+    match namespace="^dms:.*:background$"
 
     background-effect{
         blur false
