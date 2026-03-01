@@ -19,6 +19,7 @@ window-rule {
 ### blur
 
 > 该功能补全（弹窗模糊，透明剔除）仅对实时模糊（xray false）有效
+> dms 取消背景压暗功能时，launcher 输入法 blur 区域会无效，暂时不知道怎么解决
 
 包括窗口模糊，layer 模糊，弹窗模糊
 
