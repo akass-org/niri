@@ -7,7 +7,7 @@ use smithay::backend::renderer::element::surface::{
 };
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
-use smithay::desktop::{LayerSurface, PopupManager};
+use smithay::desktop::{LayerSurface, PopupKind, PopupManager};
 use smithay::utils::{Logical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::wlr_layer::{ExclusiveZone, Layer};
@@ -379,73 +379,58 @@ impl MappedLayer {
             );
 
             if self.background_effect.is_visible() {
-                let area = Rectangle::new(location, self.block_out_buffer.size());
-                // Effects not requested by the surface itself are drawn to match the geometry.
-                let mut clip = true;
+                // let area = Rectangle::new(location, self.block_out_buffer.borrow().size());
+                let mut main_surface_geo = popup.geometry().to_f64();
+                main_surface_geo.loc = buf_pos + offset.to_f64();
                 let mut need_ignore_alpha = true;
+
+                match popup {
+                    PopupKind::InputMethod(ref _t) => {
+                        // main_surface_geo.loc = buf_pos;
+                        main_surface_geo.size = self.block_out_buffer.size();
+                        main_surface_geo.size.w -= popup_offset.x as f64;
+                        main_surface_geo.size.h -= popup_offset.y as f64;
+                    }
+                    _ => {}
+                }
 
                 // FIXME: support blur regions on subsurfaces in addition to the main surface.
                 let mut subregion = None;
                 let blur_geometry =
                     if let Some(rects) = self.blur_region_surface(popup.wl_surface()) {
-                        debug!("using surface-provided blur region for popup {rects:?}");
                         if rects.is_empty() {
                             // Surface has a set, but empty blur region.
                             None
                         } else {
                             // If the surface itself requests the effects, apply different defaults.
-                            clip = false;
                             need_ignore_alpha = false;
+                            subregion = Some(background_effect::EffectSubregion {
+                                rects,
+                                scale: Scale::from(1.),
+                                offset: main_surface_geo.loc,
+                            });
 
-                            // Use geometry-shaped blur for blocked-out layers to avoid unintentionally
-                            // leaking any surface shapes. We render those layers as geometry-shaped solid
-                            // rectangles anyway.
-                            if ctx.target.should_block_out(self.rules.block_out_from) {
-                                if self.rules.transparent_block.is_some() {
-                                    None
-                                } else {
-                                    clip = true;
-                                    Some(area)
-                                }
-                            } else {
-                                let mut main_surface_geo = popup.geometry().to_f64();
-                                main_surface_geo.loc += area.loc;
-
-                                subregion = Some(background_effect::EffectSubregion {
-                                    rects,
-                                    scale: Scale::from(1.),
-                                    offset: main_surface_geo.loc,
-                                });
-
-                                main_surface_geo = main_surface_geo
-                                    .to_physical_precise_round(Scale::from(scale))
-                                    .to_logical(Scale::from(scale));
-                                Some(main_surface_geo)
-                            }
+                            main_surface_geo = main_surface_geo
+                                .to_physical_precise_round(Scale::from(scale))
+                                .to_logical(Scale::from(scale));
+                            Some(main_surface_geo)
                         }
                     } else {
-                        if ctx.target.should_block_out(self.rules.block_out_from)
-                            && self
-                                .rules
-                                .transparent_block
-                                .is_some_and(|transparent_block| transparent_block == true)
-                        {
-                            None
-                        } else {
-                            debug!("not using surface-provided blur region for popup {area:?}");
-                            Some(area)
-                        }
+                        Some(main_surface_geo)
                     };
 
-                debug!("rendering background effect for popup ");
                 if let Some(geometry) = blur_geometry {
+                    // debug!(
+                    //     "render alpha_tex for popup {:?} and need ignore alpha {:?}",
+                    //     geometry, need_ignore_alpha
+                    // );
                     let mut alpha_tex = None;
                     if need_ignore_alpha && geometry.size.w > 0. && geometry.size.h > 0. {
                         let gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> =
                             Some(render_elements_from_surface_tree(
                                 ctx.renderer.as_gles_renderer(),
                                 popup.wl_surface(),
-                                (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
+                                main_surface_geo.loc.to_physical_precise_round(scale),
                                 scale,
                                 alpha,
                                 Kind::ScanoutCandidate,
@@ -456,12 +441,12 @@ impl MappedLayer {
                             .and_then(|gles_elems| {
                                 render_to_texture_with_offset(
                                     ctx.renderer.as_gles_renderer(),
-                                    popup.geometry().size.to_physical_precise_round(scale),
-                                    self.scale.into(),
+                                    main_surface_geo.size.to_physical_precise_round(scale),
+                                    scale.into(),
                                     Transform::Normal,
                                     Fourcc::Abgr8888,
                                     gles_elems.into_iter(),
-                                    (buf_pos + offset.to_f64()).to_physical_precise_round(scale),
+                                    main_surface_geo.loc.to_physical_precise_round(scale),
                                 )
                                 .inspect_err(|e| warn!("failed to render alpha tex: {e:?}"))
                                 .ok()
@@ -473,16 +458,16 @@ impl MappedLayer {
                     let params = background_effect::RenderParams {
                         geometry,
                         subregion,
-                        clip: clip.then_some((area, CornerRadius::default())),
-                        pos_in_backdrop: (buf_pos + offset.to_f64()),
+                        clip: None,
+                        pos_in_backdrop: main_surface_geo.loc,
                         zoom: 1.,
-                        scale: self.scale,
+                        scale: scale.x,
                         alpha_tex,
                         ignore_alpha: self.rules.background_effect.ignore_alpha.unwrap_or(0.)
                             as f32,
                         exponent: self.rules.exponent.unwrap_or(2.8) as f32,
-                        offset: (0., 0.),
-                        force_damage: false,
+                        offset: (-popup_offset.x as f32, -popup_offset.y as f32),
+                        force_damage: true,
                     };
                     self.background_effect
                         .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));

@@ -298,6 +298,13 @@ pub trait LayoutElement {
         None
     }
 
+    fn blur_region_surface(
+        &self,
+        surface: &WlSurface,
+    ) -> Option<Arc<Vec<Rectangle<i32, Logical>>>> {
+        None
+    }
+
     /// Returns the geometry of this window's main surface relative to the visual geometry.
     fn main_surface_geo(&self) -> Rectangle<i32, Logical> {
         Rectangle::from_size(self.size())

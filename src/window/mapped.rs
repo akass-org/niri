@@ -717,7 +717,7 @@ impl LayoutElement for Mapped {
                 let mut need_ignore_alpha = true;
 
                 match popup {
-                    PopupKind::InputMethod(ref t) => {
+                    PopupKind::InputMethod(ref _t) => {
                         // main_surface_geo.loc = buf_pos;
                         main_surface_geo.size.w -= popup_offset.x as f64;
                         main_surface_geo.size.h -= popup_offset.y as f64;
@@ -732,27 +732,28 @@ impl LayoutElement for Mapped {
 
                 // FIXME: support blur regions on subsurfaces in addition to the main surface.
                 let mut subregion = None;
-                let blur_geometry = if let Some(rects) = self.blur_region() {
-                    if rects.is_empty() {
-                        // Surface has a set, but empty blur region.
-                        None
-                    } else {
-                        // If the surface itself requests the effects, apply different defaults.
-                        need_ignore_alpha = false;
-                        subregion = Some(render_helpers::background_effect::EffectSubregion {
-                            rects,
-                            scale: Scale::from(1.),
-                            offset: main_surface_geo.loc,
-                        });
+                let blur_geometry =
+                    if let Some(rects) = self.blur_region_surface(popup.wl_surface()) {
+                        if rects.is_empty() {
+                            // Surface has a set, but empty blur region.
+                            None
+                        } else {
+                            // If the surface itself requests the effects, apply different defaults.
+                            need_ignore_alpha = false;
+                            subregion = Some(render_helpers::background_effect::EffectSubregion {
+                                rects,
+                                scale: Scale::from(1.),
+                                offset: main_surface_geo.loc,
+                            });
 
-                        main_surface_geo = main_surface_geo
-                            .to_physical_precise_round(Scale::from(scale))
-                            .to_logical(Scale::from(scale));
+                            main_surface_geo = main_surface_geo
+                                .to_physical_precise_round(Scale::from(scale))
+                                .to_logical(Scale::from(scale));
+                            Some(main_surface_geo)
+                        }
+                    } else {
                         Some(main_surface_geo)
-                    }
-                } else {
-                    Some(main_surface_geo)
-                };
+                    };
 
                 if let Some(geometry) = blur_geometry {
                     let mut alpha_tex = None;
@@ -1457,6 +1458,13 @@ impl LayoutElement for Mapped {
 
     fn blur_region(&self) -> Option<Arc<Vec<Rectangle<i32, Logical>>>> {
         with_states(self.toplevel().wl_surface(), get_cached_blur_region)
+    }
+
+    fn blur_region_surface(
+        &self,
+        surface: &WlSurface,
+    ) -> Option<Arc<Vec<Rectangle<i32, Logical>>>> {
+        with_states(surface, get_cached_blur_region)
     }
 
     fn on_commit(&mut self, commit_serial: Serial) {
