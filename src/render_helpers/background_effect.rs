@@ -71,6 +71,8 @@ pub struct RenderParams {
     pub exponent: f32,
 
     pub offset: (f32, f32),
+
+    pub force_damage: bool,
 }
 
 impl RenderParams {
@@ -197,7 +199,6 @@ impl BackgroundEffect {
         corner_radius: CornerRadius,
         effect: niri_config::BackgroundEffect,
         has_blur_region: bool,
-        force_damage: bool,
     ) {
         // If the surface explicitly requests a blur region, default blur to true.
         let blur = if has_blur_region {
@@ -222,7 +223,7 @@ impl BackgroundEffect {
 
         // FIXME: do we also need to damage when subregion changes? Then we'll need to pass
         // subregion in update_render_elements().
-        if !force_damage && self.options == options && self.corner_radius == corner_radius {
+        if self.options == options && self.corner_radius == corner_radius {
             return;
         }
 

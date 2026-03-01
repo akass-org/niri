@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use glam::{Mat3, Vec2};
@@ -23,6 +23,7 @@ use crate::render_helpers::shaders::{mat3_uniform, Shaders};
 pub struct FramebufferEffect {
     id: Id,
     inner: Rc<RefCell<Option<Inner>>>,
+    commit_counter: Cell<CommitCounter>,
 }
 
 #[derive(Debug)]
@@ -38,6 +39,7 @@ pub struct FramebufferEffectElement {
     saturation: f32,
     inner: Rc<RefCell<Option<Inner>>>,
     exponent: f32,
+    commit_counter: CommitCounter,
 }
 
 #[derive(Debug)]
@@ -55,6 +57,7 @@ impl FramebufferEffect {
         Self {
             id: Id::new(),
             inner: Rc::new(RefCell::new(None)),
+            commit_counter: Cell::new(CommitCounter::default()),
         }
     }
 
@@ -68,6 +71,12 @@ impl FramebufferEffect {
         ignore_alpha: f32,
         exponent: f32,
     ) -> Option<FramebufferEffectElement> {
+        if params.force_damage {
+            let mut c = self.commit_counter.get();
+            c.increment();
+            self.commit_counter.set(c);
+        }
+
         let (clip_geo, corner_radius) = params
             .clip
             .unwrap_or((params.geometry, CornerRadius::default()));
@@ -84,6 +93,7 @@ impl FramebufferEffect {
             saturation,
             inner: self.inner.clone(),
             exponent,
+            commit_counter: self.commit_counter.get(),
         };
 
         {
@@ -153,7 +163,8 @@ impl Element for FramebufferEffectElement {
     }
 
     fn current_commit(&self) -> CommitCounter {
-        CommitCounter::default()
+        // CommitCounter::default()
+        self.commit_counter
     }
 
     fn src(&self) -> Rectangle<f64, Buffer> {

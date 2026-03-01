@@ -27,7 +27,6 @@ use crate::utils::{baba_is_float_offset, round_logical_in_physical};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use std::cell::Cell;
 
 #[derive(Debug)]
 pub struct MappedLayer {
@@ -54,8 +53,6 @@ pub struct MappedLayer {
 
     /// Clock for driving animations.
     clock: Clock,
-
-    force_damage: Cell<bool>,
 }
 
 niri_render_elements! {
@@ -94,7 +91,6 @@ impl MappedLayer {
             shadow: Shadow::new(shadow_config),
             background_effect,
             clock,
-            force_damage: Cell::new(false),
         }
     }
 
@@ -136,7 +132,6 @@ impl MappedLayer {
             radius,
             self.rules.background_effect,
             has_blur_region,
-            self.force_damage.get(),
         );
     }
 
@@ -298,8 +293,9 @@ impl MappedLayer {
 
             if let Some(geometry) = blur_geometry {
                 let mut alpha_tex = None;
+                let mut force_damage = false;
                 if need_ignore_alpha && geometry.size.w > 0. && geometry.size.h > 0. {
-                    self.force_damage.set(true);
+                    force_damage = true;
                     // debug!("surface size {:?}", self.surface.);
                     let gles_elems: Option<Vec<LayerSurfaceRenderElement<GlesRenderer>>> =
                         Some(render_elements_from_surface_tree(
@@ -328,8 +324,6 @@ impl MappedLayer {
                             .ok()
                         })
                         .map(|r| r.0);
-                } else {
-                    self.force_damage.set(false);
                 }
 
                 pos_in_backdrop += (geometry.loc - area.loc).upscale(zoom);
@@ -344,6 +338,7 @@ impl MappedLayer {
                     ignore_alpha: self.rules.background_effect.ignore_alpha.unwrap_or(0.) as f32,
                     exponent: self.rules.exponent.unwrap_or(2.8) as f32,
                     offset: (0., 0.),
+                    force_damage,
                 };
                 self.background_effect
                     .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));
@@ -487,6 +482,7 @@ impl MappedLayer {
                             as f32,
                         exponent: self.rules.exponent.unwrap_or(2.8) as f32,
                         offset: (0., 0.),
+                        force_damage: false,
                     };
                     self.background_effect
                         .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));

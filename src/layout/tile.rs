@@ -487,7 +487,6 @@ impl<W: LayoutElement> Tile<W> {
             radius,
             rules.background_effect,
             has_blur_region,
-            false,
         );
 
         let draw_border_with_background = rules
@@ -1404,6 +1403,7 @@ impl<W: LayoutElement> Tile<W> {
                     ignore_alpha: 0.,
                     exponent,
                     offset: (0., 0.),
+                    force_damage: false,
                 };
                 self.background_effect
                     .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));

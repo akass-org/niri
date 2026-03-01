@@ -679,7 +679,6 @@ impl LayoutElement for Mapped {
             radius,
             self.rules.background_effect,
             has_blur_region,
-            false,
         );
     }
 
@@ -799,6 +798,7 @@ impl LayoutElement for Mapped {
                             as f32,
                         exponent: self.rules.rounding_exponent.unwrap_or(2.8) as f32,
                         offset: (-popup_offset.x as f32, -popup_offset.y as f32),
+                        force_damage: false,
                     };
                     self.background_effect
                         .render(ctx.as_gles(), params, &mut |elem| push(elem.into()));
