@@ -383,11 +383,12 @@ impl MappedLayer {
                 let mut main_surface_geo = popup.geometry().to_f64();
                 main_surface_geo.loc = buf_pos + offset.to_f64();
                 let mut need_ignore_alpha = true;
+                let mut clip = true;
 
                 match popup {
                     PopupKind::InputMethod(ref _t) => {
                         // main_surface_geo.loc = buf_pos;
-                        main_surface_geo.size = self.block_out_buffer.size();
+                        main_surface_geo.size = self.view_size;
                         main_surface_geo.size.w -= popup_offset.x as f64;
                         main_surface_geo.size.h -= popup_offset.y as f64;
                     }
@@ -404,16 +405,26 @@ impl MappedLayer {
                         } else {
                             // If the surface itself requests the effects, apply different defaults.
                             need_ignore_alpha = false;
-                            subregion = Some(background_effect::EffectSubregion {
-                                rects,
-                                scale: Scale::from(1.),
-                                offset: main_surface_geo.loc,
-                            });
 
-                            main_surface_geo = main_surface_geo
-                                .to_physical_precise_round(Scale::from(scale))
-                                .to_logical(Scale::from(scale));
-                            Some(main_surface_geo)
+                            if ctx.target.should_block_out(self.rules.block_out_from) {
+                                if self.rules.transparent_block.is_some() {
+                                    None
+                                } else {
+                                    clip = true;
+                                    Some(main_surface_geo)
+                                }
+                            } else {
+                                subregion = Some(background_effect::EffectSubregion {
+                                    rects,
+                                    scale: Scale::from(1.),
+                                    offset: main_surface_geo.loc,
+                                });
+
+                                main_surface_geo = main_surface_geo
+                                    .to_physical_precise_round(Scale::from(scale))
+                                    .to_logical(Scale::from(scale));
+                                Some(main_surface_geo)
+                            }
                         }
                     } else {
                         Some(main_surface_geo)
@@ -458,7 +469,7 @@ impl MappedLayer {
                     let params = background_effect::RenderParams {
                         geometry,
                         subregion,
-                        clip: None,
+                        clip: clip.then_some((main_surface_geo, CornerRadius::default())),
                         pos_in_backdrop: main_surface_geo.loc,
                         zoom: 1.,
                         scale: scale.x,

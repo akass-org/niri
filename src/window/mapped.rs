@@ -715,6 +715,7 @@ impl LayoutElement for Mapped {
                 let mut main_surface_geo = popup.geometry().to_f64();
                 main_surface_geo.loc = buf_pos + offset.to_f64();
                 let mut need_ignore_alpha = true;
+                let mut clip = true;
 
                 match popup {
                     PopupKind::InputMethod(ref _t) => {
@@ -732,11 +733,20 @@ impl LayoutElement for Mapped {
 
                 // FIXME: support blur regions on subsurfaces in addition to the main surface.
                 let mut subregion = None;
-                let blur_geometry =
-                    if let Some(rects) = self.blur_region_surface(popup.wl_surface()) {
-                        if rects.is_empty() {
-                            // Surface has a set, but empty blur region.
-                            None
+                let blur_geometry = if let Some(rects) =
+                    self.blur_region_surface(popup.wl_surface())
+                {
+                    if rects.is_empty() {
+                        // Surface has a set, but empty blur region.
+                        None
+                    } else {
+                        if ctx.target.should_block_out(self.rules.block_out_from) {
+                            if self.rules.transparent_block.is_some() {
+                                None
+                            } else {
+                                clip = true;
+                                Some(main_surface_geo)
+                            }
                         } else {
                             // If the surface itself requests the effects, apply different defaults.
                             need_ignore_alpha = false;
@@ -751,9 +761,10 @@ impl LayoutElement for Mapped {
                                 .to_logical(Scale::from(scale));
                             Some(main_surface_geo)
                         }
-                    } else {
-                        Some(main_surface_geo)
-                    };
+                    }
+                } else {
+                    Some(main_surface_geo)
+                };
 
                 if let Some(geometry) = blur_geometry {
                     let mut alpha_tex = None;
@@ -790,7 +801,7 @@ impl LayoutElement for Mapped {
                     let params = background_effect::RenderParams {
                         geometry,
                         subregion,
-                        clip: None,
+                        clip: clip.then_some((main_surface_geo, CornerRadius::default())),
                         pos_in_backdrop: main_surface_geo.loc,
                         zoom: 1.,
                         scale: scale.x,
