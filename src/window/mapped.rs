@@ -726,10 +726,10 @@ impl LayoutElement for Mapped {
                     _ => {}
                 }
 
-                debug!(
-                    "popup geometry: {main_surface_geo:?}, buffer {:?}",
-                    popup.wl_surface()
-                );
+                // debug!(
+                //     "popup geometry: {main_surface_geo:?}, buffer {:?}",
+                //     popup.wl_surface()
+                // );
 
                 // FIXME: support blur regions on subsurfaces in addition to the main surface.
                 let mut subregion = None;
