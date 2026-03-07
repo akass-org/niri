@@ -19,6 +19,7 @@ use self::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use self::texture::{TextureBuffer, TextureRenderElement};
 use crate::render_helpers::renderer::AsGlesRenderer;
 use crate::render_helpers::xray::Xray;
+use smithay::utils::user_data::UserDataMap;
 
 pub mod background_effect;
 pub mod blur;
@@ -347,9 +348,11 @@ fn render_elements(
 
         if let Some(mut damage) = output_rect.intersection(dst) {
             damage.loc -= dst.loc;
+
+            let cache = UserDataMap::new();
             if element.is_framebuffer_effect() {
                 element
-                    .capture_framebuffer(&mut frame, src, dst)
+                    .capture_framebuffer(&mut frame, src, dst, &cache)
                     .context("error in capture_framebuffer()")?;
             }
             element
@@ -426,10 +429,11 @@ fn render_elements_with_offset(
 
         if let Some(mut damage) = output_rect.intersection(dst) {
             damage.loc -= dst.loc;
-            // debug!("rendering element with dst {dst:?} and damage {damage:?}");
+
+            let cache = UserDataMap::new();
             if element.is_framebuffer_effect() {
                 element
-                    .capture_framebuffer(&mut frame, src, dst)
+                    .capture_framebuffer(&mut frame, src, dst, &cache)
                     .context("error in capture_framebuffer()")?;
             }
             element

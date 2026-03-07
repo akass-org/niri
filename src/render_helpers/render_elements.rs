@@ -109,10 +109,11 @@ macro_rules! niri_render_elements {
                 frame: &mut smithay::backend::renderer::gles::GlesFrame<'_, '_>,
                 src: smithay::utils::Rectangle<f64, smithay::utils::Buffer>,
                 dst: smithay::utils::Rectangle<i32, smithay::utils::Physical>,
+                cache: &smithay::utils::user_data::UserDataMap,
             ) -> Result<(), smithay::backend::renderer::gles::GlesError> {
                 match self {
                     $($name::$variant(elem) => {
-                        smithay::backend::renderer::element::RenderElement::<smithay::backend::renderer::gles::GlesRenderer>::capture_framebuffer(elem, frame, src, dst)
+                        smithay::backend::renderer::element::RenderElement::<smithay::backend::renderer::gles::GlesRenderer>::capture_framebuffer(elem, frame, src, dst, cache)
                     })+
                 }
             }
@@ -147,10 +148,11 @@ macro_rules! niri_render_elements {
                 frame: &mut $crate::backend::tty::TtyFrame<'render, '_, '_>,
                 src: smithay::utils::Rectangle<f64, smithay::utils::Buffer>,
                 dst: smithay::utils::Rectangle<i32, smithay::utils::Physical>,
+                cache: &smithay::utils::user_data::UserDataMap,
             ) -> Result<(), $crate::backend::tty::TtyRendererError<'render>> {
                 match self {
                     $($name::$variant(elem) => {
-                        smithay::backend::renderer::element::RenderElement::<$crate::backend::tty::TtyRenderer<'render>>::capture_framebuffer(elem, frame, src, dst)
+                        smithay::backend::renderer::element::RenderElement::<$crate::backend::tty::TtyRenderer<'render>>::capture_framebuffer(elem, frame, src, dst, cache)
                     })+
                 }
             }

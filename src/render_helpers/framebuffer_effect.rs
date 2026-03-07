@@ -9,7 +9,7 @@ use smithay::backend::renderer::gles::{
     ffi, GlesError, GlesFrame, GlesRenderer, GlesTexProgram, GlesTexture, Uniform,
 };
 use smithay::backend::renderer::utils::CommitCounter;
-use smithay::backend::renderer::{Frame as _, Texture as _};
+use smithay::backend::renderer::{Frame as _, FrameContext as _, Offscreen, Texture as _};
 use smithay::gpu_span_location;
 use smithay::utils::{Buffer, Logical, Physical, Rectangle, Scale, Transform};
 
@@ -18,6 +18,7 @@ use crate::render_helpers::background_effect::{EffectSubregion, RenderParams};
 use crate::render_helpers::blur::{Blur, BlurOptions};
 use crate::render_helpers::renderer::AsGlesFrame as _;
 use crate::render_helpers::shaders::{mat3_uniform, Shaders};
+use smithay::utils::user_data::UserDataMap;
 
 #[derive(Debug)]
 pub struct FramebufferEffect {
@@ -188,6 +189,10 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
         frame: &mut GlesFrame<'_, '_>,
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
+        // FIXME: use cache to have separate textures and blur per element clone, to avoid always
+        // redrawing when there are multiple clones (background/bottom layer nonxray in the
+        // Overview).
+        _cache: &UserDataMap,
     ) -> Result<(), GlesError> {
         let mut inner = self.inner.borrow_mut();
         let Some(inner) = &mut *inner else {
@@ -239,6 +244,8 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
 
         let location = gpu_span_location!("FramebufferEffectElement::capture_framebuffer");
         frame.with_gpu_span(location, |frame| {
+            let mut guard = frame.renderer();
+
             // Recreate framebuffer if needed.
             if inner
                 .framebuffer
@@ -251,15 +258,17 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
                 fb
             } else {
                 trace!("creating framebuffer texture sized {} × {}", size.w, size.h);
-                let texture = frame.create_texture(Fourcc::Abgr8888, size)?;
+                let renderer = guard.as_mut();
+                let texture = renderer.create_buffer(Fourcc::Abgr8888, size)?;
                 inner.framebuffer.insert(texture)
             };
 
             // Prepare blur textures.
             let mut blur = Option::zip(inner.blur.as_mut(), self.blur_options);
             if let Some((b, options)) = &mut blur {
+                let renderer = guard.as_mut();
                 if let Err(err) = b.prepare_textures(
-                    |fourcc, size| frame.create_texture(fourcc, size),
+                    |fourcc, size| renderer.create_buffer(fourcc, size),
                     framebuffer,
                     *options,
                 ) {
@@ -267,6 +276,10 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
                     blur = None;
                 }
             }
+
+            // We can't use renderer.with_context() as that will reset the GlesFrame binding that we
+            // want to blit from.
+            drop(guard);
 
             // Blit the framebuffer contents.
             frame.with_context(|gl| unsafe {
@@ -323,7 +336,9 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
             }
 
             if let Some((blur, options)) = blur {
-                match blur.render(frame, framebuffer, options) {
+                let mut guard = frame.renderer();
+                let renderer = guard.as_mut();
+                match blur.render(renderer, framebuffer, options) {
                     Ok(blurred) => inner.intermediate = Some(blurred),
                     Err(err) => {
                         warn!("error rendering blur: {err:?}");
@@ -427,9 +442,10 @@ impl<'render> RenderElement<TtyRenderer<'render>> for FramebufferEffectElement {
         frame: &mut TtyFrame<'_, '_, '_>,
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
+        cache: &UserDataMap,
     ) -> Result<(), TtyRendererError<'render>> {
         let gles_frame = frame.as_gles_frame();
-        RenderElement::<GlesRenderer>::capture_framebuffer(&self, gles_frame, src, dst)?;
+        RenderElement::<GlesRenderer>::capture_framebuffer(&self, gles_frame, src, dst, cache)?;
         Ok(())
     }
 

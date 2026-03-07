@@ -221,7 +221,7 @@ impl Blur {
 
     pub fn render(
         &mut self,
-        frame: &mut GlesFrame,
+        frame: &mut GlesRenderer,
         source: &GlesTexture,
         options: BlurOptions,
     ) -> anyhow::Result<GlesTexture> {
