@@ -23,6 +23,8 @@ impl InsertHintElement {
                 active_gradient: config.gradient,
                 inactive_gradient: config.gradient,
                 urgent_gradient: config.gradient,
+                fade_duration_ms: 0,
+                gradient_spin_speed: 0.,
             }),
         }
     }
@@ -37,6 +39,8 @@ impl InsertHintElement {
             active_gradient: config.gradient,
             inactive_gradient: config.gradient,
             urgent_gradient: config.gradient,
+            fade_duration_ms: 0,
+            gradient_spin_speed: 0.,
         });
     }
 
@@ -51,8 +55,9 @@ impl InsertHintElement {
         radius: CornerRadius,
         scale: f64,
     ) {
-        self.inner
-            .update_render_elements(size, true, false, false, view_rect, radius, scale, 1.,2.8);
+        self.inner.update_render_elements(
+            size, true, false, false, view_rect, radius, scale, 1., 2.8, 0.,
+        );
     }
 
     pub fn render(
