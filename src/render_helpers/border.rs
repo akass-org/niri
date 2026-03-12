@@ -139,6 +139,7 @@ impl BorderRenderElement {
             alpha,
             exponent,
         };
+
         if self.params == params {
             return;
         }

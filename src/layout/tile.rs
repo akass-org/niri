@@ -482,6 +482,7 @@ impl<W: LayoutElement> Tile<W> {
                 .as_ref()
                 .is_some_and(|anim| !anim.is_done())
             || (self.was_focus_active && self.options.layout.focus_ring.gradient_spin_speed > 0.)
+            || (self.was_focus_active && self.options.layout.border.gradient_spin_speed > 0.)
     }
 
     pub fn update_render_elements(&mut self, is_active: bool, view_rect: Rectangle<f64, Logical>) {
@@ -522,22 +523,6 @@ impl<W: LayoutElement> Tile<W> {
             .scaled_by(1. - expanded_progress as f32);
 
         let exponent = rules.rounding_exponent.unwrap_or(2.8);
-
-        self.border.update_render_elements(
-            border_window_size,
-            is_active,
-            !draw_border_with_background,
-            self.window.is_urgent(),
-            Rectangle::new(
-                view_rect.loc - Point::from((border_width, border_width)),
-                view_rect.size,
-            ),
-            radius,
-            self.scale,
-            1. - expanded_progress as f32,
-            exponent,
-            0.,
-        );
 
         let radius = if self.visual_border_width().is_some() {
             radius
@@ -608,7 +593,14 @@ impl<W: LayoutElement> Tile<W> {
         let ring_is_active = is_active || focus_ring_alpha > 0.0;
 
         // Rotate gradient while focus ring is visible.
-        let spin_speed = self.options.layout.focus_ring.gradient_spin_speed as f32;
+        let spin_speed = if !self.options.layout.focus_ring.off {
+            self.options.layout.focus_ring.gradient_spin_speed as f32
+        } else if !self.options.layout.border.off {
+            self.options.layout.border.gradient_spin_speed as f32
+        } else {
+            0.
+        };
+
         let gradient_angle_offset = if ring_is_active && spin_speed > 0. {
             let secs = self.clock.now().as_secs_f32();
             (secs * spin_speed) % 360.
@@ -625,6 +617,22 @@ impl<W: LayoutElement> Tile<W> {
             radius,
             self.scale,
             focus_ring_alpha * (1. - expanded_progress as f32),
+            exponent,
+            gradient_angle_offset,
+        );
+
+        self.border.update_render_elements(
+            border_window_size,
+            ring_is_active,
+            !draw_border_with_background,
+            self.window.is_urgent(),
+            Rectangle::new(
+                view_rect.loc - Point::from((border_width, border_width)),
+                view_rect.size,
+            ),
+            radius,
+            self.scale,
+            1. - expanded_progress as f32,
             exponent,
             gradient_angle_offset,
         );
