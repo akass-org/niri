@@ -435,6 +435,7 @@ impl Blur {
                 gl.DrawArrays(ffi::TRIANGLES, 0, 6);
                 gl.DisableVertexAttribArray(program.attrib_vert as u32);
 
+                gl.DeleteBuffers(1, &vbo);
                 //finish end
             }
 
