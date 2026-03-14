@@ -67,6 +67,7 @@ impl FocusRing {
         alpha: f32,
         exponent: f32,
         gradient_angle_offset: f32,
+        mix_ratio: f32,
     ) {
         let width = self.config.width;
         self.full_size = win_size + Size::from((width, width)).upscale(2.);
@@ -86,6 +87,24 @@ impl FocusRing {
 
         let radius = radius.fit_to(self.full_size.w as f32, self.full_size.h as f32);
 
+        fn mix_color(active: Gradient, inactive: Gradient, mix_ratio: f32) -> Gradient {
+            let t = mix_ratio;
+            let inv = 1. - mix_ratio;
+
+            let mut new = active.clone();
+            new.from.r = active.from.r * t + inactive.from.r * inv;
+            new.from.g = active.from.g * t + inactive.from.g * inv;
+            new.from.b = active.from.b * t + inactive.from.b * inv;
+            new.from.a = active.from.a * t + inactive.from.a * inv;
+
+            new.to.r = active.to.r * t + inactive.to.r * inv;
+            new.to.g = active.to.g * t + inactive.to.g * inv;
+            new.to.b = active.to.b * t + inactive.to.b * inv;
+            new.to.a = active.to.a * t + inactive.to.a * inv;
+
+            new
+        }
+
         let gradient = if is_urgent {
             self.config.urgent_gradient
         } else if is_active {
@@ -97,7 +116,38 @@ impl FocusRing {
         self.use_border_shader = radius != CornerRadius::default() || gradient.is_some();
 
         // Set the defaults for solid color + rounded corners.
-        let gradient = gradient.unwrap_or_else(|| Gradient::from(color));
+        // let gradient = gradient.unwrap_or_else(|| Gradient::from(color));
+        let gradient = if is_urgent {
+            mix_color(
+                self.config
+                    .urgent_gradient
+                    .unwrap_or_else(|| Gradient::from(self.config.urgent_color)),
+                self.config
+                    .inactive_gradient
+                    .unwrap_or_else(|| Gradient::from(self.config.inactive_color)),
+                mix_ratio,
+            )
+        } else if is_active {
+            mix_color(
+                self.config
+                    .active_gradient
+                    .unwrap_or_else(|| Gradient::from(self.config.active_color)),
+                self.config
+                    .inactive_gradient
+                    .unwrap_or_else(|| Gradient::from(self.config.inactive_color)),
+                mix_ratio,
+            )
+        } else {
+            mix_color(
+                self.config
+                    .active_gradient
+                    .unwrap_or_else(|| Gradient::from(self.config.active_color)),
+                self.config
+                    .inactive_gradient
+                    .unwrap_or_else(|| Gradient::from(self.config.inactive_color)),
+                mix_ratio,
+            )
+        };
 
         let full_rect = Rectangle::new(Point::from((-width, -width)), self.full_size);
         let gradient_area = match gradient.relative_to {

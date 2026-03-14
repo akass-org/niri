@@ -481,8 +481,12 @@ impl<W: LayoutElement> Tile<W> {
                 .focus_ring_anim
                 .as_ref()
                 .is_some_and(|anim| !anim.is_done())
-            || (self.was_focus_active && self.options.layout.focus_ring.gradient_spin_speed > 0.)
-            || (self.was_focus_active && self.options.layout.border.gradient_spin_speed > 0.)
+            || (self.was_focus_active
+                && !self.options.layout.focus_ring.off
+                && self.options.layout.focus_ring.gradient_spin_speed > 0.)
+            || (self.was_focus_active
+                && !self.options.layout.border.off
+                && self.options.layout.border.gradient_spin_speed > 0.)
     }
 
     pub fn update_render_elements(&mut self, is_active: bool, view_rect: Rectangle<f64, Logical>) {
@@ -549,7 +553,13 @@ impl<W: LayoutElement> Tile<W> {
         };
         let radius = radius.expanded_by(self.focus_ring.width() as f32);
 
-        let fade_ms = self.options.layout.focus_ring.fade_duration_ms;
+        let fade_ms = if !self.options.layout.focus_ring.off {
+            self.options.layout.focus_ring.fade_duration_ms
+        } else if !self.options.layout.border.off {
+            self.options.layout.border.fade_duration_ms
+        } else {
+            0
+        };
 
         // Animate focus ring fade in/out on focus change.
         if is_active != self.was_focus_active {
@@ -619,6 +629,7 @@ impl<W: LayoutElement> Tile<W> {
             focus_ring_alpha * (1. - expanded_progress as f32),
             exponent,
             gradient_angle_offset,
+            1.,
         );
 
         self.border.update_render_elements(
@@ -635,6 +646,7 @@ impl<W: LayoutElement> Tile<W> {
             1. - expanded_progress as f32,
             exponent,
             gradient_angle_offset,
+            focus_ring_alpha * (1. - expanded_progress as f32),
         );
 
         self.fullscreen_backdrop.resize(animated_tile_size);

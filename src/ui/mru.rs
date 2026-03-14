@@ -546,6 +546,7 @@ impl Thumbnail {
                 0.5,
                 exponent,
                 0.,
+                1.,
             );
             background.render(ctx.renderer, loc, &mut |elem| {
                 push(WindowMruUiRenderElement::FocusRing(elem))
@@ -569,6 +570,7 @@ impl Thumbnail {
                 1.,
                 exponent,
                 0.,
+                1.,
             );
 
             border.render(ctx.renderer, loc, &mut |elem| {
